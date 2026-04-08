@@ -1,0 +1,742 @@
+openapi: 3.0.3
+info:
+  title: KGazer API
+  description: REST API for KGazer — Kafka Compacted Topic Explorer
+  version: 1.0.0
+  license:
+    name: MIT
+
+servers:
+  - url: http://localhost:1899
+    description: Local development
+
+paths:
+  /api/health:
+    get:
+      summary: Health check
+      operationId: getHealth
+      tags: [System]
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  version:
+                    type: string
+                    example: 0.1.0
+
+  /api/clusters:
+    get:
+      summary: List configured clusters
+      operationId: listClusters
+      tags: [Clusters]
+      responses:
+        "200":
+          description: List of clusters with status
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ClusterStatus"
+
+  /api/clusters/{cluster}/pause:
+    post:
+      summary: Pause consumption for a cluster
+      operationId: pauseCluster
+      tags: [Clusters]
+      parameters:
+        - $ref: "#/components/parameters/clusterPath"
+      responses:
+        "200":
+          description: Cluster paused
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cluster:
+                    type: string
+                  paused:
+                    type: boolean
+                    example: true
+
+  /api/clusters/{cluster}/resume:
+    post:
+      summary: Resume consumption for a cluster
+      operationId: resumeCluster
+      tags: [Clusters]
+      parameters:
+        - $ref: "#/components/parameters/clusterPath"
+      responses:
+        "200":
+          description: Cluster resumed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cluster:
+                    type: string
+                  paused:
+                    type: boolean
+                    example: false
+
+  /api/topics:
+    get:
+      summary: List topics
+      operationId: listTopics
+      tags: [Topics]
+      parameters:
+        - $ref: "#/components/parameters/clusterQuery"
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+          description: Sort direction for last_updated
+      responses:
+        "200":
+          description: List of topics with stats and progress
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TopicSummary"
+
+  /api/topics/{topic}:
+    get:
+      summary: Get topic detail
+      operationId: getTopicDetail
+      tags: [Topics]
+      parameters:
+        - $ref: "#/components/parameters/topicPath"
+        - $ref: "#/components/parameters/clusterQuery"
+      responses:
+        "200":
+          description: Topic detail with progress
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TopicDetail"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/topics/{topic}/reconsume:
+    post:
+      summary: Re-consume topic from beginning
+      description: Deletes all stored messages and keys for the topic and signals the consumer to reset offsets to the beginning.
+      operationId: reconsumeTopic
+      tags: [Topics]
+      parameters:
+        - $ref: "#/components/parameters/topicPath"
+        - $ref: "#/components/parameters/clusterQuery"
+      responses:
+        "200":
+          description: Reconsume triggered
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted:
+                    type: integer
+                    description: Number of messages deleted
+                  topic:
+                    type: string
+
+  /api/topics/{topic}/keys:
+    get:
+      summary: List keys for a topic
+      operationId: listKeys
+      tags: [Keys]
+      parameters:
+        - $ref: "#/components/parameters/topicPath"
+        - $ref: "#/components/parameters/clusterQuery"
+        - name: search
+          in: query
+          schema:
+            type: string
+          description: Filter keys by name (case-insensitive substring match). Exact matches appear first.
+        - name: sort_by
+          in: query
+          schema:
+            type: string
+            enum: [offset, last_updated]
+            default: last_updated
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+        - name: partition
+          in: query
+          schema:
+            type: string
+          description: Comma-separated partition IDs to filter by
+          example: "0,1,3"
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            format: int64
+          description: Filter by exact offset
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        "200":
+          description: Paginated key list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedKeys"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/topics/{topic}/keys/{key}/history:
+    get:
+      summary: Get message history for a key
+      operationId: getKeyHistory
+      tags: [Keys]
+      parameters:
+        - $ref: "#/components/parameters/topicPath"
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/clusterQuery"
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        "200":
+          description: Paginated message history (most recent first)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedMessages"
+
+  /api/topics/{topic}/history:
+    get:
+      summary: Get message history for a key (via query param)
+      operationId: getKeyHistoryByQuery
+      tags: [Keys]
+      parameters:
+        - $ref: "#/components/parameters/topicPath"
+        - name: key
+          in: query
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/clusterQuery"
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        "200":
+          description: Paginated message history
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedMessages"
+        "400":
+          description: Missing key parameter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/topics/{topic}/consumer-groups:
+    get:
+      summary: List consumer groups for a topic
+      description: Returns consumer groups that have active members assigned to this topic or committed offsets for it.
+      operationId: listTopicConsumerGroups
+      tags: [Consumer Groups]
+      parameters:
+        - $ref: "#/components/parameters/topicPath"
+        - $ref: "#/components/parameters/clusterQuery"
+      responses:
+        "200":
+          description: List of consumer groups with lag
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ConsumerGroupInfo"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/topics/{topic}/consumer-groups/{group}:
+    get:
+      summary: Get consumer group lag detail
+      description: Returns per-partition lag detail including consumer assignment info.
+      operationId: getConsumerGroupLag
+      tags: [Consumer Groups]
+      parameters:
+        - $ref: "#/components/parameters/topicPath"
+        - name: group
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/clusterQuery"
+      responses:
+        "200":
+          description: Per-partition lag detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConsumerGroupLagDetail"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/topics/{topic}/consumer-groups/{group}/reset-offsets:
+    post:
+      summary: Reset consumer group offsets
+      description: |
+        Resets committed offsets for the consumer group on this topic.
+        The entire consumer group must have no active members assigned to this topic.
+        Supports three targets: earliest, latest, or specific per-partition offsets.
+      operationId: resetConsumerGroupOffsets
+      tags: [Consumer Groups]
+      parameters:
+        - $ref: "#/components/parameters/topicPath"
+        - name: group
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/clusterQuery"
+        - name: target
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [earliest, latest, specific]
+      requestBody:
+        description: Required when target=specific. Per-partition offset values.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                offsets:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      partition:
+                        type: integer
+                        format: int32
+                      offset:
+                        type: integer
+                        format: int64
+                    required: [partition, offset]
+              required: [offsets]
+      responses:
+        "200":
+          description: Offsets reset successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  group:
+                    type: string
+                  topic:
+                    type: string
+                  target:
+                    type: string
+                  partitions:
+                    type: integer
+        "400":
+          description: Invalid target or request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Consumer group has active members assigned to this topic
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/settings/info:
+    get:
+      summary: Runtime info and sanitised configuration
+      description: Returns version, uptime, cluster configuration (with secrets redacted), connection status, and aggregate statistics.
+      operationId: getSettingsInfo
+      tags: [Settings]
+      responses:
+        "200":
+          description: Instance info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SettingsInfo"
+
+  /api/settings/orphaned-clusters:
+    get:
+      summary: List orphaned clusters
+      description: Returns clusters that have data in the database but are no longer in the configuration.
+      operationId: listOrphanedClusters
+      tags: [Settings]
+      responses:
+        "200":
+          description: List of orphaned clusters with stats
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ClusterStats"
+
+  /api/settings/clusters/{cluster}:
+    delete:
+      summary: Delete all data for a cluster
+      description: Permanently deletes all topics, messages, and keys for the specified cluster.
+      operationId: deleteClusterData
+      tags: [Settings]
+      parameters:
+        - $ref: "#/components/parameters/clusterPath"
+      responses:
+        "200":
+          description: Cluster data deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cluster:
+                    type: string
+                  deleted:
+                    type: boolean
+                    example: true
+
+components:
+  parameters:
+    clusterPath:
+      name: cluster
+      in: path
+      required: true
+      schema:
+        type: string
+    clusterQuery:
+      name: cluster
+      in: query
+      schema:
+        type: string
+      description: Cluster name to filter by
+    topicPath:
+      name: topic
+      in: path
+      required: true
+      schema:
+        type: string
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+
+    ClusterStatus:
+      type: object
+      properties:
+        name:
+          type: string
+          example: capmain-dev
+        status:
+          type: string
+          enum: [connected, connecting, disconnected]
+        paused:
+          type: boolean
+
+    Progress:
+      type: object
+      properties:
+        total:
+          type: integer
+          format: int64
+        consumed:
+          type: integer
+          format: int64
+        percent:
+          type: number
+          format: double
+        done:
+          type: boolean
+
+    TopicSummary:
+      type: object
+      properties:
+        name:
+          type: string
+          example: catalog.products-broadcast
+        cluster:
+          type: string
+        partitions:
+          type: integer
+        compacted:
+          type: boolean
+        message_format:
+          type: string
+          enum: [avro, json, other, unknown]
+        message_count:
+          type: integer
+        key_count:
+          type: integer
+        last_updated:
+          type: string
+          format: date-time
+        progress:
+          $ref: "#/components/schemas/Progress"
+
+    TopicDetail:
+      type: object
+      properties:
+        name:
+          type: string
+        cluster:
+          type: string
+        partitions:
+          type: integer
+        compacted:
+          type: boolean
+        message_format:
+          type: string
+        consumed_messages:
+          type: integer
+        unique_keys:
+          type: integer
+        progress:
+          $ref: "#/components/schemas/Progress"
+
+    KeySummary:
+      type: object
+      properties:
+        key:
+          type: string
+        message_count:
+          type: integer
+        partition:
+          type: integer
+        offset:
+          type: integer
+          format: int64
+        last_updated:
+          type: string
+          format: date-time
+
+    Message:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        key:
+          type: string
+        body:
+          description: JSON-encoded message body
+        partition:
+          type: integer
+        offset:
+          type: integer
+          format: int64
+        timestamp:
+          type: string
+          format: date-time
+
+    PaginatedKeys:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/KeySummary"
+        total:
+          type: integer
+        page:
+          type: integer
+        limit:
+          type: integer
+
+    PaginatedMessages:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Message"
+        total:
+          type: integer
+        page:
+          type: integer
+        limit:
+          type: integer
+
+    ConsumerGroupInfo:
+      type: object
+      properties:
+        group_id:
+          type: string
+          example: vx-upc-consumer
+        member_count:
+          type: integer
+        state:
+          type: string
+          example: Stable
+        active_on_topic:
+          type: integer
+          description: Number of members with partitions assigned to this specific topic
+        total_lag:
+          type: integer
+          format: int64
+
+    ConsumerGroupLagDetail:
+      type: object
+      properties:
+        group_id:
+          type: string
+        state:
+          type: string
+        active_members:
+          type: integer
+          description: Number of members assigned to this topic
+        partitions:
+          type: array
+          items:
+            $ref: "#/components/schemas/PartitionLag"
+        total_lag:
+          type: integer
+          format: int64
+
+    PartitionLag:
+      type: object
+      properties:
+        partition:
+          type: integer
+          format: int32
+        committed_offset:
+          type: integer
+          format: int64
+        end_offset:
+          type: integer
+          format: int64
+        lag:
+          type: integer
+          format: int64
+        consumer_id:
+          type: string
+        client_id:
+          type: string
+        host:
+          type: string
+
+    ClusterStats:
+      type: object
+      properties:
+        name:
+          type: string
+        topic_count:
+          type: integer
+        message_count:
+          type: integer
+        key_count:
+          type: integer
+
+    SettingsInfo:
+      type: object
+      properties:
+        version:
+          type: string
+          example: 0.1.0
+        started_at:
+          type: string
+          format: date-time
+        uptime:
+          type: string
+          example: 2h35m12s
+        clusters:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              bootstrap_servers:
+                type: string
+              schema_registry:
+                type: boolean
+              properties:
+                type: object
+                additionalProperties:
+                  type: string
+                description: Kafka properties with secrets redacted as "***"
+        cluster_status:
+          type: array
+          items:
+            $ref: "#/components/schemas/ClusterStatus"
+        stats:
+          type: object
+          properties:
+            total_topics:
+              type: integer
+            total_messages:
+              type: integer
+            total_keys:
+              type: integer
+        config:
+          type: object
+          properties:
+            server_port:
+              type: integer
+            db_host:
+              type: string
+            db_name:
+              type: string
+            compacted_only:
+              type: boolean
+
+  responses:
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"

@@ -1,0 +1,12 @@
+backend/kgazer
+backend/tmp/
+frontend/node_modules/
+frontend/dist/
+config.yml
+.idea/
+.vscode/
+*.swp
+.DS_Store
+.env
+*.log
+.playwright-mcp/
