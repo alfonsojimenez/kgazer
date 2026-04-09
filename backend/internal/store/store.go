@@ -503,9 +503,15 @@ func (s *Store) ListKeys(ctx context.Context, cluster, topic, search, sortBy, so
 		orderBy = fmt.Sprintf("(key = $%d) DESC, (key ILIKE $%d || '%%%%') DESC, %s", searchIdx, searchIdx, orderBy)
 	}
 
+	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM keys %s", where)
+	var total int
+	if err := s.pool.QueryRow(ctx, countQuery, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("counting keys: %w", err)
+	}
+
 	args = append(args, limit, pgOffset)
 	query := fmt.Sprintf(
-		"SELECT key, message_count, partition, offset_id, last_updated, COUNT(*) OVER() AS total FROM keys %s ORDER BY %s LIMIT $%d OFFSET $%d",
+		"SELECT key, message_count, partition, offset_id, last_updated FROM keys %s ORDER BY %s LIMIT $%d OFFSET $%d",
 		where, orderBy, len(args)-1, len(args))
 
 	rows, err := s.pool.Query(ctx, query, args...)
@@ -515,10 +521,9 @@ func (s *Store) ListKeys(ctx context.Context, cluster, topic, search, sortBy, so
 	defer rows.Close()
 
 	var keys []KeySummary
-	var total int
 	for rows.Next() {
 		var k KeySummary
-		if err := rows.Scan(&k.Key, &k.MessageCount, &k.Partition, &k.Offset, &k.LastUpdated, &total); err != nil {
+		if err := rows.Scan(&k.Key, &k.MessageCount, &k.Partition, &k.Offset, &k.LastUpdated); err != nil {
 			return nil, 0, fmt.Errorf("scanning key: %w", err)
 		}
 		keys = append(keys, k)
@@ -536,8 +541,15 @@ func (s *Store) GetKeyHistory(ctx context.Context, cluster, topic, key string, p
 		return nil, 0, fmt.Errorf("getting topic: %w", err)
 	}
 
+	var total int
+	if err := s.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM messages WHERE topic_id = $1 AND key = $2`,
+		topicID, key).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("counting messages: %w", err)
+	}
+
 	query := `
-		SELECT id, key, body, partition, offset_id, timestamp, COUNT(*) OVER() AS total
+		SELECT id, key, body, partition, offset_id, timestamp
 		FROM messages
 		WHERE topic_id = $1 AND key = $2
 		ORDER BY timestamp DESC
@@ -550,10 +562,9 @@ func (s *Store) GetKeyHistory(ctx context.Context, cluster, topic, key string, p
 	defer rows.Close()
 
 	var messages []Message
-	var total int
 	for rows.Next() {
 		var m Message
-		if err := rows.Scan(&m.ID, &m.Key, &m.Body, &m.Partition, &m.Offset, &m.Timestamp, &total); err != nil {
+		if err := rows.Scan(&m.ID, &m.Key, &m.Body, &m.Partition, &m.Offset, &m.Timestamp); err != nil {
 			return nil, 0, fmt.Errorf("scanning message: %w", err)
 		}
 		messages = append(messages, m)
