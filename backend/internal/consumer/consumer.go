@@ -217,10 +217,11 @@ func Start(ctx context.Context, cluster config.Cluster, s *store.Store, tracker 
 
 				key := ""
 				if msg.Key != nil {
-					key = strings.ReplaceAll(string(msg.Key), "\x00", "")
+					key = strings.ToValidUTF8(strings.ReplaceAll(string(msg.Key), "\x00", ""), "\uFFFD")
 				}
 
 				body, format := sanitizeBody(msg.Value, dec)
+				body = bytes.ToValidUTF8(body, []byte("\uFFFD"))
 
 				ts := msg.Timestamp
 				if ts.IsZero() {
