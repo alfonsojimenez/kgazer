@@ -25,7 +25,7 @@ services:
       - "${KGAZER_PORT_UI:-4200}:5173"
     environment:
       - API_PROXY_TARGET=http://backend:8080
-    command: sh -c "npm ci && echo '' && echo '  🚀 KGazer ready at http://localhost:${KGAZER_PORT_UI:-4200}' && echo '' && npm run dev"
+    command: sh -c "[ ! -d node_modules/.bin ] && npm install; echo '' && echo '  🚀 KGazer ready at http://localhost:${KGAZER_PORT_UI:-4200}' && echo '' && npm run dev"
     depends_on:
       - backend
 
