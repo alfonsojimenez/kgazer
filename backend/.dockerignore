@@ -1,0 +1,21 @@
+# Git
+.git
+.gitignore
+
+# Editor
+.vscode
+.idea
+*.swp
+*.swo
+
+# Development artifacts
+tmp/
+*.log
+*.out
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test binaries
+*_test
