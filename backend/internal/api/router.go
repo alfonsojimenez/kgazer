@@ -420,12 +420,14 @@ func handleTopicConsumerGroups(clusters []config.Cluster) http.HandlerFunc {
 					if tp.Topic == nil || *tp.Topic != topic {
 						continue
 					}
+					end := endOffsets[tp.Partition]
+					var committed int64
 					if tp.Offset >= 0 {
 						hasOffsets = true
-						end := endOffsets[tp.Partition]
-						if lag := end - int64(tp.Offset); lag > 0 {
-							totalLag += lag
-						}
+						committed = int64(tp.Offset)
+					}
+					if lag := end - committed; lag > 0 {
+						totalLag += lag
 					}
 				}
 			}
