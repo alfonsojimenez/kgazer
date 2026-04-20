@@ -258,6 +258,7 @@ func TestListKeysEndpoint(t *testing.T) {
 	now := time.Now()
 	s.UpsertKey(ctx, id, "key-1", 0, 10, now)
 	s.UpsertKey(ctx, id, "key-2", 0, 20, now)
+	s.IncrementTopicStats(ctx, id, 2, 2, now, "json")
 
 	router := newTestRouter(s)
 	req := httptest.NewRequest("GET", "/api/topics/orders/keys?cluster=cluster-a", nil)

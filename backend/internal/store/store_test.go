@@ -306,6 +306,7 @@ func TestListKeys(t *testing.T) {
 	s.UpsertKey(ctx, id, "user-100", 0, 10, now)
 	s.UpsertKey(ctx, id, "user-200", 0, 20, now.Add(time.Second))
 	s.UpsertKey(ctx, id, "order-300", 1, 30, now.Add(2*time.Second))
+	s.IncrementTopicStats(ctx, id, 3, 3, now.Add(2*time.Second), "json")
 
 	t.Run("list all keys", func(t *testing.T) {
 		keys, total, err := s.ListKeys(ctx, "cluster-a", "orders", "", "", "desc", nil, 0, 1, 50)
