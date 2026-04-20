@@ -460,15 +460,18 @@ func (s *Store) ListKeys(ctx context.Context, cluster, topic, search, sortBy, so
 	pgOffset := (page - 1) * limit
 
 	var topicID int
+	var keyCount int
 	err := s.pool.QueryRow(ctx,
-		`SELECT id FROM topics WHERE cluster = $1 AND name = $2`,
-		cluster, topic).Scan(&topicID)
+		`SELECT id, key_count FROM topics WHERE cluster = $1 AND name = $2`,
+		cluster, topic).Scan(&topicID, &keyCount)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, 0, ErrTopicNotFound
 	}
 	if err != nil {
 		return nil, 0, fmt.Errorf("getting topic: %w", err)
 	}
+
+	hasFilters := search != "" || len(partitions) > 0 || minOffset > 0
 
 	conditions := []string{"topic_id = $1"}
 	args := []interface{}{topicID}
@@ -503,10 +506,14 @@ func (s *Store) ListKeys(ctx context.Context, cluster, topic, search, sortBy, so
 		orderBy = fmt.Sprintf("(key = $%d) DESC, (key ILIKE $%d || '%%%%') DESC, %s", searchIdx, searchIdx, orderBy)
 	}
 
-	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM keys %s", where)
 	var total int
-	if err := s.pool.QueryRow(ctx, countQuery, args...).Scan(&total); err != nil {
-		return nil, 0, fmt.Errorf("counting keys: %w", err)
+	if hasFilters {
+		countQuery := fmt.Sprintf("SELECT COUNT(*) FROM keys %s", where)
+		if err := s.pool.QueryRow(ctx, countQuery, args...).Scan(&total); err != nil {
+			return nil, 0, fmt.Errorf("counting keys: %w", err)
+		}
+	} else {
+		total = keyCount
 	}
 
 	args = append(args, limit, pgOffset)
