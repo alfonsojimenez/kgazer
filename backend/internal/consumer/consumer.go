@@ -125,6 +125,7 @@ func Start(ctx context.Context, cluster config.Cluster, s *store.Store, tracker 
 		keyAggs := make(map[topicKeyID]*keyAgg)
 		lastFlush := time.Now()
 		var lastAuthWarn time.Time
+		var lastErrorLog time.Time
 		var totalCount int64
 
 		flush := func() {
@@ -279,7 +280,10 @@ func Start(ctx context.Context, cluster config.Cluster, s *store.Store, tracker 
 						lastAuthWarn = time.Now()
 					}
 				} else {
-					slog.Error("kafka error", "cluster", cluster.Name, "error", msg)
+					if time.Since(lastErrorLog) > time.Minute {
+						slog.Error("kafka error", "cluster", cluster.Name, "error", msg)
+						lastErrorLog = time.Now()
+					}
 				}
 			}
 		}
