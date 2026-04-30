@@ -47,6 +47,7 @@ func NewRouter(s *store.Store, t *status.Tracker, pt *progress.Tracker, clusters
 	r.Get("/api/topics/{topic}/keys/{key}/history", handleGetKeyHistory(s))
 	r.Get("/api/topics/{topic}/history", handleGetKeyHistoryByQuery(s))
 	r.Get("/api/topics/{topic}/fields", handleGetTopicFields(s))
+	r.Get("/api/topics/{topic}/timeline", handleGetKeyTimeline(s))
 
 	r.Get("/api/settings/info", handleSettingsInfo(s, t, version, startedAt, cfg))
 	r.Get("/api/settings/orphaned-clusters", handleOrphanedClusters(s, t))
@@ -253,6 +254,25 @@ func handleGetKeyHistory(s *store.Store) http.HandlerFunc {
 			"page":  page,
 			"limit": limit,
 		})
+	}
+}
+
+func handleGetKeyTimeline(s *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		topic := chi.URLParam(r, "topic")
+		cluster := r.URL.Query().Get("cluster")
+		key := r.URL.Query().Get("key")
+		if key == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "key parameter required"})
+			return
+		}
+		points, err := s.GetKeyTimeline(r.Context(), cluster, topic, key)
+		if err != nil {
+			slog.Error("getting key timeline", "error", err, "topic", topic, "key", key)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+			return
+		}
+		writeJSON(w, http.StatusOK, points)
 	}
 }
 

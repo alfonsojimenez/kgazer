@@ -618,6 +618,43 @@ func (s *Store) GetKeyHistory(ctx context.Context, cluster, topic, key string, p
 	return messages, total, nil
 }
 
+type TimelinePoint struct {
+	Timestamp time.Time `json:"timestamp"`
+	Offset    int64     `json:"offset"`
+	Partition int32     `json:"partition"`
+	BodySize  int       `json:"body_size"`
+}
+
+func (s *Store) GetKeyTimeline(ctx context.Context, cluster, topic, key string) ([]TimelinePoint, error) {
+	query := `
+		WITH t AS (
+			SELECT id FROM topics WHERE cluster = $1 AND name = $2
+		)
+		SELECT timestamp, offset_id, partition, octet_length(body::text)
+		FROM messages
+		WHERE topic_id = (SELECT id FROM t) AND key = $3
+		ORDER BY timestamp ASC`
+
+	rows, err := s.pool.Query(ctx, query, cluster, topic, key)
+	if err != nil {
+		return nil, fmt.Errorf("querying key timeline: %w", err)
+	}
+	defer rows.Close()
+
+	var points []TimelinePoint
+	for rows.Next() {
+		var p TimelinePoint
+		if err := rows.Scan(&p.Timestamp, &p.Offset, &p.Partition, &p.BodySize); err != nil {
+			return nil, fmt.Errorf("scanning timeline point: %w", err)
+		}
+		points = append(points, p)
+	}
+	if points == nil {
+		points = []TimelinePoint{}
+	}
+	return points, rows.Err()
+}
+
 func sanitizeSortDir(dir string) string {
 	if dir == "asc" {
 		return "ASC"
