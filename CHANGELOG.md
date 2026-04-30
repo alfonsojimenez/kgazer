@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-04-30
+
+### Added
+
+- Key diff timeline visualisation on the history page showing change frequency and body size over time
+- `GET /api/topics/{topic}/timeline` endpoint returning lightweight version metadata
+- SVG timeline with colour-coded bars (blue→violet→amber by body size), hover tooltips and click-to-navigate
+- Automatic time bucketing for keys with 200+ versions
+
+### Changed
+
+- Dropped redundant `idx_messages_topic_id_key` index (2 GB freed)
+- Replaced messages `BIGSERIAL` primary key with composite `(topic_id, partition, offset_id)` (1.1 GB freed)
+- `GetMaxOffsets` now reads from the keys table instead of scanning the messages table
+- `GetKeyHistory` collapsed from 3 round trips to a single CTE query
+- `ListKeys` uses `COUNT(*) OVER()` window function to eliminate separate count query when filters are active
+- `ANALYZE` runs automatically after bulk deletes in `PurgeTopicData`
+
 ## [0.3.0] - 2026-04-30
 
 ### Added
@@ -71,6 +89,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - CI pipeline (Go tests, TypeScript checks and Vitest)
 - Release pipeline (GHCR image publish on tag push)
 
+[0.4.0]: https://github.com/alfonsojimenez/kgazer/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/alfonsojimenez/kgazer/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/alfonsojimenez/kgazer/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/alfonsojimenez/kgazer/compare/v0.1.0...v0.1.1
