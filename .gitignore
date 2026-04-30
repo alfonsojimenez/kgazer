@@ -10,3 +10,5 @@ config.yml
 .env
 *.log
 .playwright-mcp/
+charts/kgazer/charts/
+charts/kgazer/Chart.lock

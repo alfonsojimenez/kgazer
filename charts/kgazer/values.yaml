@@ -1,0 +1,141 @@
+# -- Number of backend replicas
+replicaCount: 1
+
+image:
+  # -- Container image repository
+  repository: ghcr.io/alfonsojimenez/kgazer
+  # -- Image pull policy
+  pullPolicy: IfNotPresent
+  # -- Overrides the image tag (default is the chart appVersion)
+  tag: ""
+
+# -- Image pull secrets for private registries
+imagePullSecrets: []
+# -- Override the release name
+nameOverride: ""
+# -- Override the full release name
+fullnameOverride: ""
+
+serviceAccount:
+  # -- Create a ServiceAccount
+  create: true
+  # -- Annotations for the ServiceAccount
+  annotations: {}
+  # -- Name override (generated from fullname if empty)
+  name: ""
+
+# -- Pod annotations
+podAnnotations: {}
+
+# -- Pod security context
+podSecurityContext: {}
+
+# -- Container security context
+securityContext: {}
+
+service:
+  # -- Service type
+  type: ClusterIP
+  # -- Service port
+  port: 8080
+
+ingress:
+  # -- Enable ingress
+  enabled: false
+  # -- Ingress class name
+  className: ""
+  # -- Ingress annotations
+  annotations: {}
+  # -- Ingress hosts
+  hosts:
+    - host: kgazer.local
+      paths:
+        - path: /
+          pathType: Prefix
+  # -- Ingress TLS configuration
+  tls: []
+
+# -- Resource requests and limits
+resources: {}
+
+# -- Node selector
+nodeSelector: {}
+
+# -- Tolerations
+tolerations: []
+
+# -- Affinity rules
+affinity: {}
+
+# ---------------------------------------------------------------------------
+# KGazer application configuration
+# ---------------------------------------------------------------------------
+
+kgazer:
+  server:
+    # -- HTTP server port (must match service.port / containerPort)
+    port: 8080
+  # -- Only consume topics with cleanup.policy=compact
+  compactedOnly: true
+
+# ---------------------------------------------------------------------------
+# Kafka cluster definitions
+# ---------------------------------------------------------------------------
+# Each entry becomes a cluster in config.yml.
+# Sensitive fields (SASL passwords, Schema Registry credentials) are stored
+# in a Kubernetes Secret and injected via env vars — never in the ConfigMap.
+
+kafka:
+  clusters: []
+  # - name: my-cluster
+  #   bootstrapServers: kafka.example.com:9092
+  #   # -- Optional librdkafka properties (security.protocol, sasl.mechanism, etc.)
+  #   properties: {}
+  #   # -- Optional Schema Registry URL
+  #   schemaRegistry: ""
+  #   # -- SASL credentials (stored in Secret, injected as env vars)
+  #   sasl:
+  #     username: ""
+  #     password: ""
+  #   # -- Schema Registry credentials (stored in Secret)
+  #   schemaRegistryAuth:
+  #     username: ""
+  #     password: ""
+
+# ---------------------------------------------------------------------------
+# Database configuration
+# ---------------------------------------------------------------------------
+
+# -- Use an external PostgreSQL instance instead of the bundled subchart
+externalDatabase:
+  # -- Enable external database (disables bundled PostgreSQL)
+  enabled: false
+  host: ""
+  port: 5432
+  name: kgazer
+  user: kgazer
+  password: ""
+  sslmode: disable
+  # -- Use an existing Secret for the DB password (key: password)
+  existingSecret: ""
+
+# ---------------------------------------------------------------------------
+# Bundled PostgreSQL (Bitnami subchart)
+# ---------------------------------------------------------------------------
+
+postgresql:
+  # -- Deploy a PostgreSQL instance alongside KGazer
+  enabled: true
+  auth:
+    username: kgazer
+    password: kgazer
+    database: kgazer
+  primary:
+    persistence:
+      # -- Enable persistent storage for PostgreSQL data
+      enabled: true
+      # -- Storage size
+      size: 10Gi
+    # -- Extra PostgreSQL parameters
+    extendedConfiguration: |
+      max_wal_size = 4GB
