@@ -1,13 +1,14 @@
 import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { fetchKeyHistory } from "@/lib/api";
+import { fetchKeyHistory, fetchKeyTimeline } from "@/lib/api";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { DiffTimeline } from "@/components/DiffTimeline";
 import { Pagination } from "@/components/Pagination";
 import { JsonViewer } from "@/components/JsonViewer";
 import { MessageDiff } from "@/components/MessageDiff";
@@ -48,6 +49,13 @@ export function HistoryPage() {
     queryFn: () => fetchKeyHistory(topic!, key!, cluster, page, limit),
     enabled: !!topic && !!key,
     refetchInterval: 5_000,
+  });
+
+  const { data: timeline } = useQuery({
+    queryKey: ["timeline", topic, key, cluster],
+    queryFn: () => fetchKeyTimeline(topic!, key!, cluster),
+    enabled: !!topic && !!key,
+    staleTime: 30_000,
   });
 
   const decodedTopic = decodeURIComponent(topic ?? "");
@@ -110,6 +118,19 @@ export function HistoryPage() {
             </div>
           </div>
         </Card>
+      )}
+
+      {timeline && timeline.length > 1 && (
+        <DiffTimeline
+          points={timeline}
+          onSelectVersion={(offset) => {
+            const idx = timeline.findIndex((p) => p.offset === offset);
+            if (idx === -1) return;
+            const positionFromEnd = timeline.length - 1 - idx;
+            const targetPage = Math.floor(positionFromEnd / limit) + 1;
+            setPage(targetPage);
+          }}
+        />
       )}
 
       {error && (

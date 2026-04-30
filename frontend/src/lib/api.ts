@@ -134,6 +134,25 @@ export async function reconsumeTopics(topic: string, cluster?: string): Promise<
   return res.json();
 }
 
+export interface TimelinePoint {
+  timestamp: string;
+  offset: number;
+  partition: number;
+  body_size: number;
+}
+
+export async function fetchKeyTimeline(
+  topic: string,
+  key: string,
+  cluster?: string,
+): Promise<TimelinePoint[]> {
+  const params = new URLSearchParams({ key });
+  if (cluster) params.set("cluster", cluster);
+  return request<TimelinePoint[]>(
+    `/api/topics/${encodeURIComponent(topic)}/timeline?${params}`
+  );
+}
+
 export async function fetchKeyHistory(
   topic: string,
   key: string,
