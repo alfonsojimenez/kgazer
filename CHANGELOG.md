@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-04-30
+
+### Added
+
+- Key value search: search message values using `field:value` syntax in the key browser
+- Field autocomplete dropdown suggesting known JSON fields per topic
+- Filter chips for active value filters with one-click removal
+- `GET /api/topics/{topic}/fields` endpoint returning top-level JSON field names
+- `value_filter` query parameter on the keys endpoint for JSONB containment queries
+- GIN index (`jsonb_path_ops`) on the keys table body column for fast value search
+- Latest message body stored in the keys table and updated on each consumer flush
+
+### Fixed
+
+- Avro union unwrapping for `array`, `map`, `enum` and `fixed` types (previously rendered as `{"array": [...]}` instead of `[...]`)
+
+### Changed
+
+- Updated Go dependencies (confluent-kafka-go v2.14.1, pgx v5.9.2)
+- Updated frontend dependencies (ESLint 10, diff 9, React 19.2.5, Vitest 4.1.5)
+- Migrated Vitest config to separate `vitest.config.ts` (Vitest 4 compatibility)
+
 ## [0.2.0] - 2026-04-30
 
 ### Added
@@ -49,6 +71,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - CI pipeline (Go tests, TypeScript checks and Vitest)
 - Release pipeline (GHCR image publish on tag push)
 
+[0.3.0]: https://github.com/alfonsojimenez/kgazer/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/alfonsojimenez/kgazer/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/alfonsojimenez/kgazer/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/alfonsojimenez/kgazer/releases/tag/v0.1.0
