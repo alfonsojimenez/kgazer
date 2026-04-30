@@ -2,12 +2,15 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
+  fetchFields,
   fetchKeys,
   fetchTopicDetail,
   reconsumeTopics,
 
   fetchTopicConsumerGroups,
 } from "@/lib/api";
+import { parseSearch, buildSearch } from "@/lib/search-parser";
+import { cn } from "@/lib/utils";
 import {
   TableBody,
   TableCell,
@@ -112,6 +115,9 @@ export function KeysPage() {
   const [reconsumeOpen, setReconsumeOpen] = useState(false);
 
   const searchRef = useRef<HTMLInputElement>(null);
+  const suggestionsRef = useRef<HTMLDivElement>(null);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [suggestionIndex, setSuggestionIndex] = useState(-1);
   const limit = 25;
 
   const debounce = useCallback(() => {
@@ -159,6 +165,10 @@ export function KeysPage() {
     (selectedPartitions.length > 0 ? 1 : 0) +
     (offsetFilter ? 1 : 0);
 
+  const parsed = parseSearch(debouncedSearch);
+  const hasValueFilters = Object.keys(parsed.filters).length > 0;
+  const valueFilter = hasValueFilters ? JSON.stringify(parsed.filters) : undefined;
+
   const { data: topicDetail, isLoading: isDetailLoading } = useQuery({
     queryKey: ["topic-detail", topic, cluster],
     queryFn: () => fetchTopicDetail(topic!, cluster),
@@ -167,9 +177,16 @@ export function KeysPage() {
     refetchIntervalInBackground: true,
   });
 
+  const { data: fields } = useQuery({
+    queryKey: ["fields", topic, cluster],
+    queryFn: () => fetchFields(topic!, cluster),
+    enabled: !!topic,
+    staleTime: 60_000,
+  });
+
   const { data, isLoading, error } = useQuery({
     queryKey: ["keys", topic, cluster, debouncedSearch, sortBy, sortDir, page, selectedPartitions, debouncedOffset],
-    queryFn: () => fetchKeys(topic!, cluster, debouncedSearch || undefined, sortBy, sortDir, page, limit, selectedPartitions.length > 0 ? selectedPartitions : undefined, debouncedOffset || undefined),
+    queryFn: () => fetchKeys(topic!, cluster, parsed.text || undefined, sortBy, sortDir, page, limit, selectedPartitions.length > 0 ? selectedPartitions : undefined, debouncedOffset || undefined, valueFilter),
     enabled: !!topic,
     refetchInterval: 5_000,
     refetchIntervalInBackground: true,
@@ -189,6 +206,23 @@ export function KeysPage() {
       queryClient.invalidateQueries({ queryKey: ["keys", topic] });
     },
   });
+
+  const suggestions = (() => {
+    if (!fields || !showSuggestions) return [];
+    const lastToken = search.split(/\s+/).pop() ?? "";
+    if (lastToken.includes(":")) return [];
+    if (!lastToken) return fields.slice(0, 10);
+    return fields.filter((f) => f.toLowerCase().startsWith(lastToken.toLowerCase())).slice(0, 10);
+  })();
+
+  const selectSuggestion = useCallback((field: string) => {
+    const parts = search.split(/\s+/);
+    parts[parts.length - 1] = `${field}:`;
+    setSearch(parts.join(" "));
+    setShowSuggestions(false);
+    setSuggestionIndex(-1);
+    searchRef.current?.focus();
+  }, [search]);
 
   const formatKey = topicDetail?.message_format?.toLowerCase() ?? "unknown";
   const formatBadgeClass = FORMAT_BADGE_CLASSES[formatKey];
@@ -330,15 +364,56 @@ export function KeysPage() {
             {activeFilterCount} filter{activeFilterCount > 1 ? "s" : ""}
           </Badge>
         )}
-        <div className="relative ml-auto w-64">
+        <div className="relative ml-auto w-80">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             ref={searchRef}
-            placeholder="Search keys… (/ or ⌘K)"
+            placeholder="Search keys or field:value… (/ or ⌘K)"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
+            onFocus={() => setShowSuggestions(true)}
+            onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+            onKeyDown={(e) => {
+              if (!showSuggestions || suggestions.length === 0) return;
+              if (e.key === "ArrowDown") {
+                e.preventDefault();
+                setSuggestionIndex((i) => (i + 1) % suggestions.length);
+              } else if (e.key === "ArrowUp") {
+                e.preventDefault();
+                setSuggestionIndex((i) => (i <= 0 ? suggestions.length - 1 : i - 1));
+              } else if (e.key === "Enter" && suggestionIndex >= 0) {
+                e.preventDefault();
+                selectSuggestion(suggestions[suggestionIndex]);
+              } else if (e.key === "Escape") {
+                setShowSuggestions(false);
+                setSuggestionIndex(-1);
+              }
+            }}
             className="pl-9"
           />
+          {showSuggestions && suggestions.length > 0 && (
+            <div
+              ref={suggestionsRef}
+              className="absolute top-full left-0 right-0 z-20 mt-1 rounded-md border bg-popover shadow-md"
+            >
+              {suggestions.map((field, i) => (
+                <button
+                  key={field}
+                  className={cn(
+                    "w-full px-3 py-1.5 text-left text-sm hover:bg-accent",
+                    i === suggestionIndex && "bg-accent",
+                  )}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    selectSuggestion(field);
+                  }}
+                >
+                  <span className="font-mono text-xs">{field}</span>
+                  <span className="text-muted-foreground text-xs ml-1">:</span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
         <Popover open={partitionPopoverOpen} onOpenChange={setPartitionPopoverOpen}>
           <PopoverTrigger asChild>
@@ -401,6 +476,27 @@ export function KeysPage() {
           </Button>
         )}
       </div>
+
+      {hasValueFilters && (
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {Object.entries(parsed.filters).map(([field, value]) => (
+            <Badge key={field} variant="secondary" className="gap-1 pl-2 pr-1 text-xs">
+              <span className="text-muted-foreground">{field}:</span>
+              <span>{value}</span>
+              <button
+                className="ml-0.5 rounded-full hover:bg-muted p-0.5"
+                onClick={() => {
+                  const newParsed = { ...parsed, filters: { ...parsed.filters } };
+                  delete newParsed.filters[field];
+                  setSearch(buildSearch(newParsed));
+                }}
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </Badge>
+          ))}
+        </div>
+      )}
 
       {error && (
         <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive">
@@ -495,7 +591,7 @@ export function KeysPage() {
                     }
                   >
                      <TableCell className="font-mono text-sm font-medium">
-                      {debouncedSearch ? highlightMatch(k.key, debouncedSearch) : k.key}
+                      {parsed.text ? highlightMatch(k.key, parsed.text) : k.key}
                     </TableCell>
                     <TableCell className="text-right">
                       <Badge variant="secondary" className="tabular-nums">

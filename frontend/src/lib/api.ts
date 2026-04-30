@@ -91,6 +91,7 @@ export async function fetchKeys(
   limit = 25,
   partitions?: number[],
   minOffset?: number,
+  valueFilter?: string,
 ): Promise<PaginatedResponse<KeySummary>> {
   const params = new URLSearchParams({ page: String(page), limit: String(limit) });
   if (cluster) params.set("cluster", cluster);
@@ -99,9 +100,15 @@ export async function fetchKeys(
   if (sort) params.set("sort", sort);
   if (partitions && partitions.length > 0) params.set("partition", partitions.join(","));
   if (minOffset !== undefined && minOffset > 0) params.set("offset", String(minOffset));
+  if (valueFilter) params.set("value_filter", valueFilter);
   return request<PaginatedResponse<KeySummary>>(
     `/api/topics/${encodeURIComponent(topic)}/keys?${params}`
   );
+}
+
+export async function fetchFields(topic: string, cluster?: string): Promise<string[]> {
+  const params = cluster ? `?cluster=${encodeURIComponent(cluster)}` : "";
+  return request<string[]>(`/api/topics/${encodeURIComponent(topic)}/fields${params}`);
 }
 
 export interface TopicDetail {
