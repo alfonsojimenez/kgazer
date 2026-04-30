@@ -12,12 +12,15 @@ If you've ever needed to answer "what's the current value for this key?" or "wha
 
 - **Multi-cluster support** — Connect to multiple Kafka clusters simultaneously
 - **Key browser** — Search, filter and paginate through all keys in a compacted topic
+- **Key value search** — Search message values using `field:value` syntax with field autocomplete
 - **Message history** — View every version of a key with syntax-highlighted JSON and inline diffs
+- **Change timeline** — Interactive visual timeline showing when a key changed and how much
 - **Consumer group monitoring** — See which consumer groups are reading a topic, per-partition lag and consumer assignments
 - **Offset management** — Reset consumer group offsets to earliest, latest or specific per-partition values
 - **Avro support** — Automatic deserialisation via Schema Registry (Confluent-compatible)
 - **Topic lifecycle** — Detects new topics, cleans up deleted topics and handles topic recreation transparently
 - **Re-consume** — Wipe stored data and re-consume a topic from the beginning with one click
+- **Kubernetes deployment** — Helm chart with bundled PostgreSQL or external database support
 
 ## Quick Start
 
@@ -298,8 +301,10 @@ A [chi](https://github.com/go-chi/chi) HTTP router exposing a REST API. Key endp
 | Group | Endpoints | Description |
 |-------|-----------|-------------|
 | **Topics** | `GET /api/topics`, `GET /api/topics/{topic}` | List and detail with consumption progress |
-| **Keys** | `GET /api/topics/{topic}/keys` | Paginated key listing with search, partition filter, and offset filter |
+| **Keys** | `GET /api/topics/{topic}/keys` | Paginated key listing with search, partition filter, offset filter and value search |
+| **Fields** | `GET /api/topics/{topic}/fields` | Discovered JSON field names for a topic (used by value search autocomplete) |
 | **History** | `GET /api/topics/{topic}/keys/{key}/history` | Message versions for a key (most recent first) |
+| **Timeline** | `GET /api/topics/{topic}/timeline` | Lightweight version metadata for the change timeline visualisation |
 | **Consumer Groups** | `GET /api/topics/{topic}/consumer-groups`, `GET /{group}` | Live consumer groups with per-partition lag |
 | **Offset Reset** | `POST /api/topics/{topic}/consumer-groups/{group}/reset-offsets` | Reset offsets to earliest, latest, or specific values |
 | **Settings** | `GET /api/settings/info`, `GET /api/settings/orphaned-clusters`, `DELETE /api/settings/clusters/{cluster}` | Runtime stats, sanitised config, orphaned cluster management |
@@ -320,11 +325,11 @@ A topic is marked as "done" when progress reaches 99.5% or when no new messages 
 
 Three tables, defined in [`backend/migrations/`](backend/migrations/):
 
-**`topics`** — one row per cluster+topic combination. Stores partition count, compacted flag, message format, Kafka topic UUID, and cached stats (message count, key count, last message timestamp).
+**`topics`** — one row per cluster+topic combination. Stores partition count, compacted flag, message format, Kafka topic UUID and cached stats (message count, key count, last message timestamp).
 
-**`messages`** — every consumed message. Keyed by `(topic_id, partition, offset_id)` with `ON CONFLICT DO NOTHING` for idempotent writes. Stores the deserialised body as JSONB.
+**`messages`** — every consumed message. Primary key is the composite `(topic_id, partition, offset_id)` with `ON CONFLICT DO NOTHING` for idempotent writes. Stores the deserialised body as JSONB.
 
-**`keys`** — one row per unique key per topic. Tracks the latest partition, offset, and timestamp. Used for the key browser with indexes for both offset-based and time-based sorting.
+**`keys`** — one row per unique key per topic. Tracks the latest partition, offset, timestamp and a cached copy of the latest message body (JSONB). Used for the key browser with indexes for offset-based sorting, time-based sorting, trigram key search and GIN `jsonb_path_ops` value search.
 
 ## Project Structure
 
@@ -342,7 +347,7 @@ kgazer/
 │   │   ├── status/         # Cluster connection status
 │   │   ├── store/          # PostgreSQL data access layer
 │   │   └── syncer/         # Topic discovery and lifecycle management
-│   ├── migrations/         # PostgreSQL schema (3 files)
+│   ├── migrations/         # PostgreSQL schema migrations
 │   └── openapi.yaml        # API specification (OpenAPI 3.0)
 ├── frontend/
 │   ├── src/
