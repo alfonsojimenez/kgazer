@@ -77,13 +77,14 @@ func sanitize(v interface{}) interface{} {
 	}
 }
 
-var avroPrimitiveTypes = map[string]bool{
+var avroTypeNames = map[string]bool{
 	"null": true, "boolean": true, "int": true, "long": true,
 	"float": true, "double": true, "bytes": true, "string": true,
+	"array": true, "map": true, "enum": true, "fixed": true,
 }
 
 func isAvroUnionKey(key string) bool {
-	if avroPrimitiveTypes[key] {
+	if avroTypeNames[key] {
 		return true
 	}
 	for _, c := range key {
