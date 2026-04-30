@@ -303,13 +303,13 @@ func TestListKeys(t *testing.T) {
 	id, _, _ := s.UpsertTopic(ctx, "cluster-a", "orders", 3, true, "tid-001")
 	now := time.Now()
 
-	s.UpsertKey(ctx, id, "user-100", 0, 10, now)
-	s.UpsertKey(ctx, id, "user-200", 0, 20, now.Add(time.Second))
-	s.UpsertKey(ctx, id, "order-300", 1, 30, now.Add(2*time.Second))
+	s.UpsertKey(ctx, id, "user-100", 0, 10, now, nil)
+	s.UpsertKey(ctx, id, "user-200", 0, 20, now.Add(time.Second), nil)
+	s.UpsertKey(ctx, id, "order-300", 1, 30, now.Add(2*time.Second), nil)
 	s.IncrementTopicStats(ctx, id, 3, 3, now.Add(2*time.Second), "json")
 
 	t.Run("list all keys", func(t *testing.T) {
-		keys, total, err := s.ListKeys(ctx, "cluster-a", "orders", "", "", "desc", nil, 0, 1, 50)
+		keys, total, err := s.ListKeys(ctx, "cluster-a", "orders", "", "", "desc", nil, 0, "", 1, 50)
 		if err != nil {
 			t.Fatalf("ListKeys: %v", err)
 		}
@@ -322,7 +322,7 @@ func TestListKeys(t *testing.T) {
 	})
 
 	t.Run("search filter", func(t *testing.T) {
-		keys, total, err := s.ListKeys(ctx, "cluster-a", "orders", "user", "", "desc", nil, 0, 1, 50)
+		keys, total, err := s.ListKeys(ctx, "cluster-a", "orders", "user", "", "desc", nil, 0, "", 1, 50)
 		if err != nil {
 			t.Fatalf("ListKeys: %v", err)
 		}
@@ -335,7 +335,7 @@ func TestListKeys(t *testing.T) {
 	})
 
 	t.Run("partition filter", func(t *testing.T) {
-		keys, total, err := s.ListKeys(ctx, "cluster-a", "orders", "", "", "desc", []int{1}, 0, 1, 50)
+		keys, total, err := s.ListKeys(ctx, "cluster-a", "orders", "", "", "desc", []int{1}, 0, "", 1, 50)
 		if err != nil {
 			t.Fatalf("ListKeys: %v", err)
 		}
@@ -348,7 +348,7 @@ func TestListKeys(t *testing.T) {
 	})
 
 	t.Run("offset filter", func(t *testing.T) {
-		keys, total, err := s.ListKeys(ctx, "cluster-a", "orders", "", "", "desc", nil, 20, 1, 50)
+		keys, total, err := s.ListKeys(ctx, "cluster-a", "orders", "", "", "desc", nil, 20, "", 1, 50)
 		if err != nil {
 			t.Fatalf("ListKeys: %v", err)
 		}
@@ -361,7 +361,7 @@ func TestListKeys(t *testing.T) {
 	})
 
 	t.Run("sort by offset", func(t *testing.T) {
-		keys, _, err := s.ListKeys(ctx, "cluster-a", "orders", "", "offset", "asc", nil, 0, 1, 50)
+		keys, _, err := s.ListKeys(ctx, "cluster-a", "orders", "", "offset", "asc", nil, 0, "", 1, 50)
 		if err != nil {
 			t.Fatalf("ListKeys: %v", err)
 		}
@@ -374,7 +374,7 @@ func TestListKeys(t *testing.T) {
 	})
 
 	t.Run("topic not found", func(t *testing.T) {
-		_, _, err := s.ListKeys(ctx, "cluster-a", "nonexistent", "", "", "desc", nil, 0, 1, 50)
+		_, _, err := s.ListKeys(ctx, "cluster-a", "nonexistent", "", "", "desc", nil, 0, "", 1, 50)
 		if err != ErrTopicNotFound {
 			t.Errorf("expected ErrTopicNotFound, got %v", err)
 		}
@@ -429,7 +429,7 @@ func TestPurgeTopicData(t *testing.T) {
 		{TopicID: id, Key: "k1", Body: []byte(`{}`), Format: "json", Partition: 0, Offset: 0, Timestamp: now},
 	}
 	s.SaveMessageBatch(ctx, msgs)
-	s.UpsertKey(ctx, id, "k1", 0, 0, now)
+	s.UpsertKey(ctx, id, "k1", 0, 0, now, nil)
 	s.IncrementTopicStats(ctx, id, 1, 1, now, "json")
 
 	err := s.PurgeTopicData(ctx, id)
@@ -442,7 +442,7 @@ func TestPurgeTopicData(t *testing.T) {
 		t.Error("expected no messages after purge")
 	}
 
-	keys, total, _ := s.ListKeys(ctx, "cluster-a", "orders", "", "", "desc", nil, 0, 1, 50)
+	keys, total, _ := s.ListKeys(ctx, "cluster-a", "orders", "", "", "desc", nil, 0, "", 1, 50)
 	if total != 0 || len(keys) != 0 {
 		t.Error("expected no keys after purge")
 	}
@@ -470,7 +470,7 @@ func TestDeleteTopic(t *testing.T) {
 	s.SaveMessageBatch(ctx, []PendingMessage{
 		{TopicID: id, Key: "k1", Body: []byte(`{}`), Format: "json", Partition: 0, Offset: 0, Timestamp: now},
 	})
-	s.UpsertKey(ctx, id, "k1", 0, 0, now)
+	s.UpsertKey(ctx, id, "k1", 0, 0, now, nil)
 
 	err := s.DeleteTopic(ctx, id)
 	if err != nil {

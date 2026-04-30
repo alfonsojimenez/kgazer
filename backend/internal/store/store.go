@@ -118,6 +118,7 @@ type KeyEntry struct {
 	Partition int32
 	Offset    int64
 	Timestamp time.Time
+	Body      []byte
 }
 
 type PendingMessage struct {
@@ -413,16 +414,17 @@ func (s *Store) DeleteTopicMessages(ctx context.Context, cluster, topic string) 
 	return tag.RowsAffected(), nil
 }
 
-func (s *Store) UpsertKey(ctx context.Context, topicID int, key string, partition int32, offset int64, timestamp time.Time) error {
+func (s *Store) UpsertKey(ctx context.Context, topicID int, key string, partition int32, offset int64, timestamp time.Time, body []byte) error {
 	query := `
-		INSERT INTO keys (topic_id, key, message_count, partition, offset_id, last_updated)
-		VALUES ($1, $2, 1, $3, $4, $5)
+		INSERT INTO keys (topic_id, key, message_count, partition, offset_id, last_updated, body)
+		VALUES ($1, $2, 1, $3, $4, $5, $6)
 		ON CONFLICT (topic_id, key) DO UPDATE SET
 			message_count = keys.message_count + 1,
 			partition = EXCLUDED.partition,
 			offset_id = EXCLUDED.offset_id,
-			last_updated = GREATEST(keys.last_updated, EXCLUDED.last_updated)`
-	_, err := s.writePool.Exec(ctx, query, topicID, key, partition, offset, timestamp)
+			last_updated = GREATEST(keys.last_updated, EXCLUDED.last_updated),
+			body = EXCLUDED.body`
+	_, err := s.writePool.Exec(ctx, query, topicID, key, partition, offset, timestamp, body)
 	return err
 }
 
@@ -430,21 +432,22 @@ func (s *Store) UpsertKeyBatch(ctx context.Context, entries []KeyEntry) error {
 	if len(entries) == 0 {
 		return nil
 	}
-	query := `INSERT INTO keys (topic_id, key, message_count, partition, offset_id, last_updated) VALUES `
-	args := make([]interface{}, 0, len(entries)*6)
+	query := `INSERT INTO keys (topic_id, key, message_count, partition, offset_id, last_updated, body) VALUES `
+	args := make([]interface{}, 0, len(entries)*7)
 	for i, e := range entries {
 		if i > 0 {
 			query += ","
 		}
-		base := i * 6
-		query += fmt.Sprintf("($%d,$%d,$%d,$%d,$%d,$%d)", base+1, base+2, base+3, base+4, base+5, base+6)
-		args = append(args, e.TopicID, e.Key, e.Count, e.Partition, e.Offset, e.Timestamp)
+		base := i * 7
+		query += fmt.Sprintf("($%d,$%d,$%d,$%d,$%d,$%d,$%d)", base+1, base+2, base+3, base+4, base+5, base+6, base+7)
+		args = append(args, e.TopicID, e.Key, e.Count, e.Partition, e.Offset, e.Timestamp, e.Body)
 	}
 	query += ` ON CONFLICT (topic_id, key) DO UPDATE SET
 		message_count = keys.message_count + EXCLUDED.message_count,
 		partition = EXCLUDED.partition,
 		offset_id = EXCLUDED.offset_id,
-		last_updated = GREATEST(keys.last_updated, EXCLUDED.last_updated)`
+		last_updated = GREATEST(keys.last_updated, EXCLUDED.last_updated),
+		body = EXCLUDED.body`
 	_, err := s.writePool.Exec(ctx, query, args...)
 	return err
 }
@@ -456,7 +459,32 @@ func (s *Store) DeleteTopicKeys(ctx context.Context, cluster, topic string) erro
 	return err
 }
 
-func (s *Store) ListKeys(ctx context.Context, cluster, topic, search, sortBy, sortDir string, partitions []int, minOffset int64, page, limit int) ([]KeySummary, int, error) {
+func (s *Store) GetTopicFields(ctx context.Context, cluster, topic string) ([]string, error) {
+	var topicID int
+	err := s.pool.QueryRow(ctx, `SELECT id FROM topics WHERE cluster = $1 AND name = $2`, cluster, topic).Scan(&topicID)
+	if err != nil {
+		return nil, fmt.Errorf("getting topic: %w", err)
+	}
+
+	query := `SELECT jsonb_object_keys(sub.body) FROM (SELECT body FROM keys WHERE topic_id = $1 AND body IS NOT NULL LIMIT 1) sub`
+	rows, err := s.pool.Query(ctx, query, topicID)
+	if err != nil {
+		return nil, fmt.Errorf("getting topic fields: %w", err)
+	}
+	defer rows.Close()
+
+	var fields []string
+	for rows.Next() {
+		var f string
+		if err := rows.Scan(&f); err != nil {
+			return nil, fmt.Errorf("scanning field: %w", err)
+		}
+		fields = append(fields, f)
+	}
+	return fields, rows.Err()
+}
+
+func (s *Store) ListKeys(ctx context.Context, cluster, topic, search, sortBy, sortDir string, partitions []int, minOffset int64, valueFilter string, page, limit int) ([]KeySummary, int, error) {
 	pgOffset := (page - 1) * limit
 
 	var topicID int
@@ -471,7 +499,7 @@ func (s *Store) ListKeys(ctx context.Context, cluster, topic, search, sortBy, so
 		return nil, 0, fmt.Errorf("getting topic: %w", err)
 	}
 
-	hasFilters := search != "" || len(partitions) > 0 || minOffset > 0
+	hasFilters := search != "" || len(partitions) > 0 || minOffset > 0 || valueFilter != ""
 
 	conditions := []string{"topic_id = $1"}
 	args := []interface{}{topicID}
@@ -491,6 +519,11 @@ func (s *Store) ListKeys(ctx context.Context, cluster, topic, search, sortBy, so
 	if minOffset > 0 {
 		args = append(args, minOffset)
 		conditions = append(conditions, fmt.Sprintf("offset_id = $%d", len(args)))
+	}
+
+	if valueFilter != "" {
+		args = append(args, valueFilter)
+		conditions = append(conditions, fmt.Sprintf("body @> $%d::jsonb", len(args)))
 	}
 
 	where := "WHERE " + strings.Join(conditions, " AND ")

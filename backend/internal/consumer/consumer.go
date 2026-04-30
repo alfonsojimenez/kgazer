@@ -108,6 +108,7 @@ func Start(ctx context.Context, cluster config.Cluster, s *store.Store, tracker 
 			partition int32
 			offset    int64
 			timestamp time.Time
+			body      []byte
 		}
 		type topicKeyID struct {
 			topicID int
@@ -157,6 +158,7 @@ func Start(ctx context.Context, cluster config.Cluster, s *store.Store, tracker 
 						Partition: agg.partition,
 						Offset:    agg.offset,
 						Timestamp: agg.timestamp,
+						Body:      agg.body,
 					})
 				}
 				if err := s.UpsertKeyBatch(ctx, entries); err != nil {
@@ -258,6 +260,7 @@ func Start(ctx context.Context, cluster config.Cluster, s *store.Store, tracker 
 				ka.count++
 				ka.partition = msg.TopicPartition.Partition
 				ka.offset = int64(msg.TopicPartition.Offset)
+				ka.body = body
 				if ts.After(ka.timestamp) {
 					ka.timestamp = ts
 				}
