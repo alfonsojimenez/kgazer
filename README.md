@@ -96,6 +96,119 @@ docker compose --profile test run --rm test          # Backend (Go)
 docker compose --profile test run --rm test-frontend  # Frontend (Vitest)
 ```
 
+## Deploying to Kubernetes
+
+KGazer ships with a Helm chart in `charts/kgazer/`. The chart deploys the backend, a bundled PostgreSQL instance (via the Bitnami subchart) and an optional Ingress.
+
+### Prerequisites
+
+- A Kubernetes cluster (1.25+)
+- [Helm](https://helm.sh/docs/intro/install/) 3.x
+
+### Install
+
+```bash
+helm dependency update charts/kgazer
+
+helm install kgazer charts/kgazer \
+  --set 'kafka.clusters[0].name=my-cluster' \
+  --set 'kafka.clusters[0].bootstrapServers=kafka.example.com:9092'
+```
+
+This deploys KGazer with a bundled PostgreSQL database. To verify the installation:
+
+```bash
+kubectl port-forward svc/kgazer 8080:8080
+curl http://localhost:8080/api/health
+```
+
+### Using an existing PostgreSQL database
+
+To connect to an existing PostgreSQL instance instead of deploying one:
+
+```bash
+helm install kgazer charts/kgazer \
+  --set postgresql.enabled=false \
+  --set externalDatabase.enabled=true \
+  --set externalDatabase.host=my-postgres.example.com \
+  --set externalDatabase.port=5432 \
+  --set externalDatabase.name=kgazer \
+  --set externalDatabase.user=kgazer \
+  --set externalDatabase.password=changeme \
+  --set externalDatabase.sslmode=require \
+  --set 'kafka.clusters[0].name=my-cluster' \
+  --set 'kafka.clusters[0].bootstrapServers=kafka.example.com:9092'
+```
+
+If the database password is already stored in a Kubernetes Secret, reference it directly:
+
+```bash
+helm install kgazer charts/kgazer \
+  --set postgresql.enabled=false \
+  --set externalDatabase.enabled=true \
+  --set externalDatabase.host=my-postgres.example.com \
+  --set externalDatabase.name=kgazer \
+  --set externalDatabase.user=kgazer \
+  --set externalDatabase.existingSecret=my-db-credentials \
+  --set 'kafka.clusters[0].name=my-cluster' \
+  --set 'kafka.clusters[0].bootstrapServers=kafka.example.com:9092'
+```
+
+The Secret must contain a `password` key.
+
+### Configuring SASL and Schema Registry
+
+For clusters that require SASL authentication or use Schema Registry:
+
+```bash
+helm install kgazer charts/kgazer \
+  --set 'kafka.clusters[0].name=production' \
+  --set 'kafka.clusters[0].bootstrapServers=kafka.example.com:9092' \
+  --set 'kafka.clusters[0].properties.security\.protocol=SASL_SSL' \
+  --set 'kafka.clusters[0].properties.sasl\.mechanism=PLAIN' \
+  --set 'kafka.clusters[0].sasl.username=my-user' \
+  --set 'kafka.clusters[0].sasl.password=my-password' \
+  --set 'kafka.clusters[0].schemaRegistry=https://sr.example.com' \
+  --set 'kafka.clusters[0].schemaRegistryAuth.username=sr-user' \
+  --set 'kafka.clusters[0].schemaRegistryAuth.password=sr-pass'
+```
+
+SASL credentials and Schema Registry credentials are stored in a Kubernetes Secret rather than the ConfigMap.
+
+### Enabling Ingress
+
+```bash
+helm install kgazer charts/kgazer \
+  --set ingress.enabled=true \
+  --set ingress.className=nginx \
+  --set 'ingress.hosts[0].host=kgazer.example.com' \
+  --set 'ingress.hosts[0].paths[0].path=/' \
+  --set 'ingress.hosts[0].paths[0].pathType=Prefix' \
+  --set 'kafka.clusters[0].name=my-cluster' \
+  --set 'kafka.clusters[0].bootstrapServers=kafka.example.com:9092'
+```
+
+### Helm values reference
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `replicaCount` | Number of backend replicas | `1` |
+| `image.repository` | Container image | `ghcr.io/alfonsojimenez/kgazer` |
+| `image.tag` | Image tag (defaults to chart `appVersion`) | `""` |
+| `kgazer.compactedOnly` | Only consume compacted topics | `true` |
+| `kafka.clusters` | List of Kafka cluster definitions | `[]` |
+| `postgresql.enabled` | Deploy bundled PostgreSQL | `true` |
+| `postgresql.auth.password` | Bundled PostgreSQL password | `kgazer` |
+| `postgresql.primary.persistence.size` | PostgreSQL storage size | `10Gi` |
+| `externalDatabase.enabled` | Use an external PostgreSQL instance | `false` |
+| `externalDatabase.host` | External database host | `""` |
+| `externalDatabase.existingSecret` | Existing Secret for the database password | `""` |
+| `ingress.enabled` | Enable Ingress | `false` |
+| `ingress.className` | Ingress class name | `""` |
+| `resources` | CPU/memory requests and limits | `{}` |
+
+See [`charts/kgazer/values.yaml`](charts/kgazer/values.yaml) for the full list of configurable parameters.
+
 ## Configuration Reference
 
 | Field | Description | Default |
@@ -238,6 +351,7 @@ kgazer/
 │   │   ├── pages/          # Route pages (Topics, Keys, History, ConsumerGroups, Settings)
 │   │   └── test/           # Test setup
 │   └── public/             # Static assets (logo)
+├── charts/kgazer/          # Helm chart for Kubernetes deployment
 ├── docs/                   # Documentation assets
 ├── config.yml.example      # Configuration template
 ├── docker-compose.yml      # Development stack
