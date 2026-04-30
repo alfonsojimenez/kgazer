@@ -54,10 +54,10 @@ func setupTestStore(t *testing.T) *store.Store {
 			kafka_topic_id TEXT NOT NULL DEFAULT '', synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			UNIQUE(cluster, name))`,
 		`CREATE TABLE IF NOT EXISTS messages (
-			id BIGSERIAL PRIMARY KEY, topic_id INT NOT NULL REFERENCES topics(id),
+			topic_id INT NOT NULL REFERENCES topics(id),
 			key TEXT NOT NULL, body JSONB NOT NULL, format TEXT NOT NULL DEFAULT 'json',
 			partition INT NOT NULL, offset_id BIGINT NOT NULL, timestamp TIMESTAMPTZ NOT NULL,
-			created_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(topic_id, partition, offset_id))`,
+			created_at TIMESTAMPTZ DEFAULT NOW(), PRIMARY KEY(topic_id, partition, offset_id))`,
 		`CREATE TABLE IF NOT EXISTS keys (
 			id SERIAL PRIMARY KEY, topic_id INT NOT NULL REFERENCES topics(id),
 			key TEXT NOT NULL, message_count INT NOT NULL DEFAULT 1, partition INT NOT NULL DEFAULT 0,

@@ -37,7 +37,6 @@ func setupTestDB(t *testing.T) *Store {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_topics_cluster ON topics(cluster)`,
 		`CREATE TABLE IF NOT EXISTS messages (
-			id         BIGSERIAL PRIMARY KEY,
 			topic_id   INT NOT NULL REFERENCES topics(id),
 			key        TEXT NOT NULL,
 			body       JSONB NOT NULL,
@@ -46,9 +45,8 @@ func setupTestDB(t *testing.T) *Store {
 			offset_id  BIGINT NOT NULL,
 			timestamp  TIMESTAMPTZ NOT NULL,
 			created_at TIMESTAMPTZ DEFAULT NOW(),
-			UNIQUE(topic_id, partition, offset_id)
+			PRIMARY KEY(topic_id, partition, offset_id)
 		)`,
-		`CREATE INDEX IF NOT EXISTS idx_messages_topic_id_key ON messages(topic_id, key)`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_topic_id_key_ts ON messages(topic_id, key, timestamp DESC)`,
 		`CREATE TABLE IF NOT EXISTS keys (
 			id            SERIAL PRIMARY KEY,
@@ -395,6 +393,9 @@ func TestGetMaxOffsets(t *testing.T) {
 		{TopicID: id, Key: "k3", Body: []byte(`{}`), Format: "json", Partition: 1, Offset: 3, Timestamp: now},
 	}
 	s.SaveMessageBatch(ctx, msgs)
+	s.UpsertKey(ctx, id, "k1", 0, 5, now, nil)
+	s.UpsertKey(ctx, id, "k2", 0, 10, now, nil)
+	s.UpsertKey(ctx, id, "k3", 1, 3, now, nil)
 
 	offsets, err := s.GetMaxOffsets(ctx, id)
 	if err != nil {

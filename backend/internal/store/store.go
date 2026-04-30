@@ -194,6 +194,8 @@ func (s *Store) PurgeTopicData(ctx context.Context, topicID int) error {
 	if err != nil {
 		return fmt.Errorf("resetting topic stats: %w", err)
 	}
+	s.writePool.Exec(ctx, `ANALYZE messages`)
+	s.writePool.Exec(ctx, `ANALYZE keys`)
 	return nil
 }
 
@@ -287,7 +289,7 @@ type PartitionOffset struct {
 
 func (s *Store) GetMaxOffsets(ctx context.Context, topicID int) ([]PartitionOffset, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT DISTINCT ON (partition) partition, offset_id FROM messages WHERE topic_id = $1 ORDER BY partition, offset_id DESC`, topicID)
+		`SELECT partition, MAX(offset_id) FROM keys WHERE topic_id = $1 GROUP BY partition ORDER BY partition`, topicID)
 	if err != nil {
 		return nil, err
 	}
@@ -539,20 +541,21 @@ func (s *Store) ListKeys(ctx context.Context, cluster, topic, search, sortBy, so
 		orderBy = fmt.Sprintf("(key = $%d) DESC, (key ILIKE $%d || '%%%%') DESC, %s", searchIdx, searchIdx, orderBy)
 	}
 
+	args = append(args, limit, pgOffset)
+
 	var total int
-	if hasFilters {
-		countQuery := fmt.Sprintf("SELECT COUNT(*) FROM keys %s", where)
-		if err := s.pool.QueryRow(ctx, countQuery, args...).Scan(&total); err != nil {
-			return nil, 0, fmt.Errorf("counting keys: %w", err)
-		}
-	} else {
+	if !hasFilters {
 		total = keyCount
 	}
 
-	args = append(args, limit, pgOffset)
+	selectCols := "key, message_count, partition, offset_id, last_updated"
+	if hasFilters {
+		selectCols = "key, message_count, partition, offset_id, last_updated, COUNT(*) OVER() AS total"
+	}
+
 	query := fmt.Sprintf(
-		"SELECT key, message_count, partition, offset_id, last_updated FROM keys %s ORDER BY %s LIMIT $%d OFFSET $%d",
-		where, orderBy, len(args)-1, len(args))
+		"SELECT %s FROM keys %s ORDER BY %s LIMIT $%d OFFSET $%d",
+		selectCols, where, orderBy, len(args)-1, len(args))
 
 	rows, err := s.pool.Query(ctx, query, args...)
 	if err != nil {
@@ -563,8 +566,14 @@ func (s *Store) ListKeys(ctx context.Context, cluster, topic, search, sortBy, so
 	var keys []KeySummary
 	for rows.Next() {
 		var k KeySummary
-		if err := rows.Scan(&k.Key, &k.MessageCount, &k.Partition, &k.Offset, &k.LastUpdated); err != nil {
-			return nil, 0, fmt.Errorf("scanning key: %w", err)
+		if hasFilters {
+			if err := rows.Scan(&k.Key, &k.MessageCount, &k.Partition, &k.Offset, &k.LastUpdated, &total); err != nil {
+				return nil, 0, fmt.Errorf("scanning key: %w", err)
+			}
+		} else {
+			if err := rows.Scan(&k.Key, &k.MessageCount, &k.Partition, &k.Offset, &k.LastUpdated); err != nil {
+				return nil, 0, fmt.Errorf("scanning key: %w", err)
+			}
 		}
 		keys = append(keys, k)
 	}
@@ -575,42 +584,38 @@ func (s *Store) ListKeys(ctx context.Context, cluster, topic, search, sortBy, so
 func (s *Store) GetKeyHistory(ctx context.Context, cluster, topic, key string, page, limit int) ([]Message, int, error) {
 	pgOffset := (page - 1) * limit
 
-	var topicID int
-	err := s.pool.QueryRow(ctx, `SELECT id FROM topics WHERE cluster = $1 AND name = $2`, cluster, topic).Scan(&topicID)
-	if err != nil {
-		return nil, 0, fmt.Errorf("getting topic: %w", err)
-	}
-
-	var total int
-	if err := s.pool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM messages WHERE topic_id = $1 AND key = $2`,
-		topicID, key).Scan(&total); err != nil {
-		return nil, 0, fmt.Errorf("counting messages: %w", err)
-	}
-
 	query := `
-		SELECT id, key, body, partition, offset_id, timestamp
+		WITH t AS (
+			SELECT id FROM topics WHERE cluster = $1 AND name = $2
+		)
+		SELECT key, body, partition, offset_id, timestamp,
+		       COUNT(*) OVER() AS total
 		FROM messages
-		WHERE topic_id = $1 AND key = $2
+		WHERE topic_id = (SELECT id FROM t) AND key = $3
 		ORDER BY timestamp DESC
-		LIMIT $3 OFFSET $4`
+		LIMIT $4 OFFSET $5`
 
-	rows, err := s.pool.Query(ctx, query, topicID, key, limit, pgOffset)
+	rows, err := s.pool.Query(ctx, query, cluster, topic, key, limit, pgOffset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("querying key history: %w", err)
 	}
 	defer rows.Close()
 
 	var messages []Message
+	var total int
 	for rows.Next() {
 		var m Message
-		if err := rows.Scan(&m.ID, &m.Key, &m.Body, &m.Partition, &m.Offset, &m.Timestamp); err != nil {
+		if err := rows.Scan(&m.Key, &m.Body, &m.Partition, &m.Offset, &m.Timestamp, &total); err != nil {
 			return nil, 0, fmt.Errorf("scanning message: %w", err)
 		}
+		m.ID = m.Offset
 		messages = append(messages, m)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
 
-	return messages, total, rows.Err()
+	return messages, total, nil
 }
 
 func sanitizeSortDir(dir string) string {
