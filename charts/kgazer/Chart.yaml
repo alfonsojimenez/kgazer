@@ -3,7 +3,7 @@ name: kgazer
 description: Kafka Compacted Topic Explorer
 type: application
 version: 0.1.0
-appVersion: "0.4.0"
+appVersion: "0.4.1"
 home: https://github.com/alfonsojimenez/kgazer
 sources:
   - https://github.com/alfonsojimenez/kgazer
