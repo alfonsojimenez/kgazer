@@ -256,8 +256,8 @@ func TestListKeysEndpoint(t *testing.T) {
 
 	id, _, _ := s.UpsertTopic(ctx, "cluster-a", "orders", 3, true, "")
 	now := time.Now()
-	s.UpsertKey(ctx, id, "key-1", 0, 10, now)
-	s.UpsertKey(ctx, id, "key-2", 0, 20, now)
+	s.UpsertKey(ctx, id, "key-1", 0, 10, now, nil)
+	s.UpsertKey(ctx, id, "key-2", 0, 20, now, nil)
 	s.IncrementTopicStats(ctx, id, 2, 2, now, "json")
 
 	router := newTestRouter(s)

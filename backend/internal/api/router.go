@@ -46,6 +46,7 @@ func NewRouter(s *store.Store, t *status.Tracker, pt *progress.Tracker, clusters
 	r.Get("/api/topics/{topic}/keys", handleListKeys(s))
 	r.Get("/api/topics/{topic}/keys/{key}/history", handleGetKeyHistory(s))
 	r.Get("/api/topics/{topic}/history", handleGetKeyHistoryByQuery(s))
+	r.Get("/api/topics/{topic}/fields", handleGetTopicFields(s))
 
 	r.Get("/api/settings/info", handleSettingsInfo(s, t, version, startedAt, cfg))
 	r.Get("/api/settings/orphaned-clusters", handleOrphanedClusters(s, t))
@@ -184,7 +185,9 @@ func handleListKeys(s *store.Store) http.HandlerFunc {
 			}
 		}
 
-		keys, total, err := s.ListKeys(r.Context(), cluster, topic, search, sortBy, sortDir, partitions, minOffset, page, limit)
+		valueFilter := r.URL.Query().Get("value_filter")
+
+		keys, total, err := s.ListKeys(r.Context(), cluster, topic, search, sortBy, sortDir, partitions, minOffset, valueFilter, page, limit)
 		if errors.Is(err, store.ErrTopicNotFound) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "topic not found"})
 			return
@@ -205,6 +208,23 @@ func handleListKeys(s *store.Store) http.HandlerFunc {
 			"page":  page,
 			"limit": limit,
 		})
+	}
+}
+
+func handleGetTopicFields(s *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		topic := chi.URLParam(r, "topic")
+		cluster := r.URL.Query().Get("cluster")
+		fields, err := s.GetTopicFields(r.Context(), cluster, topic)
+		if err != nil {
+			slog.Error("getting topic fields", "error", err, "topic", topic)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+			return
+		}
+		if fields == nil {
+			fields = []string{}
+		}
+		writeJSON(w, http.StatusOK, fields)
 	}
 }
 
