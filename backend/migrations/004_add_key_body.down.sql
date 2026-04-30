@@ -1,0 +1,2 @@
+DROP INDEX IF EXISTS idx_keys_body_gin;
+ALTER TABLE keys DROP COLUMN IF EXISTS body;
