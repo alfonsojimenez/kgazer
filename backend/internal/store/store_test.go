@@ -21,6 +21,7 @@ func setupTestDB(t *testing.T) *Store {
 	}
 
 	migrations := []string{
+		`DROP TABLE IF EXISTS keys, messages, topics CASCADE`,
 		`CREATE TABLE IF NOT EXISTS topics (
 			id              SERIAL PRIMARY KEY,
 			cluster         TEXT NOT NULL,
@@ -56,6 +57,7 @@ func setupTestDB(t *testing.T) *Store {
 			partition     INT NOT NULL DEFAULT 0,
 			offset_id     BIGINT NOT NULL DEFAULT 0,
 			last_updated  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			body          JSONB,
 			UNIQUE(topic_id, key)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_keys_topic_id_last_updated ON keys(topic_id, last_updated DESC)`,

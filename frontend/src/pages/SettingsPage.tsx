@@ -118,7 +118,7 @@ export function SettingsPage() {
             </h2>
           </div>
           <div className="space-y-3">
-            {info.clusters.map((cluster) => {
+            {[...info.clusters].sort((a, b) => a.name.localeCompare(b.name)).map((cluster) => {
               const status = info.cluster_status.find(s => s.name === cluster.name);
               return (
                 <Card key={cluster.name} className="p-4">
