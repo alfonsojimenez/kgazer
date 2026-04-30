@@ -5,11 +5,11 @@ go 1.25.0
 toolchain go1.26.1
 
 require (
-	github.com/confluentinc/confluent-kafka-go/v2 v2.14.0
+	github.com/confluentinc/confluent-kafka-go/v2 v2.14.1
 	github.com/go-chi/chi/v5 v5.2.5
 	github.com/go-chi/cors v1.2.2
 	github.com/golang-migrate/migrate/v4 v4.19.1
-	github.com/jackc/pgx/v5 v5.9.1
+	github.com/jackc/pgx/v5 v5.9.2
 	github.com/linkedin/goavro/v2 v2.15.0
 	gopkg.in/yaml.v3 v3.0.1
 )
