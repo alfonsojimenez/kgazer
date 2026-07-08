@@ -520,7 +520,7 @@ func (s *Store) ListKeys(ctx context.Context, cluster, topic, search, sortBy, so
 
 	if minOffset > 0 {
 		args = append(args, minOffset)
-		conditions = append(conditions, fmt.Sprintf("offset_id = $%d", len(args)))
+		conditions = append(conditions, fmt.Sprintf("offset_id >= $%d", len(args)))
 	}
 
 	if valueFilter != "" {

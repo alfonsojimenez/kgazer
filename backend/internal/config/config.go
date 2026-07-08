@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"regexp"
-	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -117,10 +116,6 @@ func (c *Cluster) TranslateProperties() {
 
 	delete(c.Properties, "sasl.jaas.config")
 
-	if _, ok := c.Properties["security.protocol"]; ok {
-		c.Properties["security.protocol"] = strings.ReplaceAll(
-			c.Properties["security.protocol"], "SASL_PLAINTEXT", "SASL_PLAINTEXT")
-	}
 }
 
 func applyEnvOverrides(cfg *Config) {
