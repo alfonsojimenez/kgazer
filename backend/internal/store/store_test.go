@@ -352,11 +352,11 @@ func TestListKeys(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ListKeys: %v", err)
 		}
-		if total != 1 {
-			t.Errorf("expected total=1 for offset=20, got %d", total)
+		if total != 2 {
+			t.Errorf("expected total=2 for minOffset=20 (offset >= 20), got %d", total)
 		}
-		if len(keys) != 1 {
-			t.Errorf("expected 1 key, got %d", len(keys))
+		if len(keys) != 2 {
+			t.Errorf("expected 2 keys, got %d", len(keys))
 		}
 	})
 

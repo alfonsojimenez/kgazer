@@ -8,8 +8,19 @@ interface JsonViewerProps {
   forceExpanded?: boolean;
 }
 
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
 function syntaxHighlight(json: string): string {
-  return json.replace(
+  // Escape the full string first so no raw HTML can be injected, then
+  // match on the escaped form. Quoted strings become &lt;...&gt; safe;
+  // the regex matches the original quote chars which are not HTML-special.
+  const escaped = escapeHtml(json);
+  return escaped.replace(
     /("(\\u[\da-fA-F]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+-]?\d+)?)/g,
     (match) => {
       let cls = "text-orange-400";
@@ -21,7 +32,7 @@ function syntaxHighlight(json: string): string {
         cls = "text-zinc-500";
       }
       return `<span class="${cls}">${match}</span>`;
-    }
+    },
   );
 }
 

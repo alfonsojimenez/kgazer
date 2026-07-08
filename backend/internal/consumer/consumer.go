@@ -133,9 +133,22 @@ func Start(ctx context.Context, cluster config.Cluster, s *store.Store, tracker 
 			if len(batch) == 0 {
 				return
 			}
-			inserted, err := s.SaveMessageBatch(ctx, batch)
+			var inserted int64
+			var err error
+			for attempt := range 3 {
+				inserted, err = s.SaveMessageBatch(ctx, batch)
+				if err == nil {
+					break
+				}
+				slog.Error("batch save failed", "cluster", cluster.Name, "error", err,
+					"batch_size", len(batch), "attempt", attempt+1)
+				if attempt < 2 {
+					time.Sleep(time.Duration(attempt+1) * time.Second)
+				}
+			}
 			if err != nil {
-				slog.Error("batch save failed", "cluster", cluster.Name, "error", err, "batch_size", len(batch))
+				slog.Error("batch save failed after retries, dropping batch",
+					"cluster", cluster.Name, "batch_size", len(batch))
 			}
 			if inserted > 0 {
 				for tid, stats := range batchStats {
