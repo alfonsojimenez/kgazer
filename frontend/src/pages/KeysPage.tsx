@@ -44,12 +44,13 @@ import { Search, RotateCcw, Loader2, ArrowDown, ArrowUp, Check, Users, Filter, X
 const FORMAT_BADGE_CLASSES: Record<string, string> = {
   json: "bg-emerald-500/10 text-emerald-500 border-emerald-500/20",
   avro: "bg-blue-500/10 text-blue-500 border-blue-500/20",
+  protobuf: "bg-amber-500/10 text-amber-500 border-amber-500/20",
 };
 
 const COMPACTED_BADGE_CLASS = "bg-violet-500/10 text-violet-500 border-violet-500/20";
 
 function formatLabel(format: string): string {
-  const labels: Record<string, string> = { json: "JSON", avro: "Avro" };
+  const labels: Record<string, string> = { json: "JSON", avro: "Avro", protobuf: "Protobuf" };
   return labels[format.toLowerCase()] ?? "Other";
 }
 

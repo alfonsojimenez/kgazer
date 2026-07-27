@@ -41,7 +41,7 @@ function timeAgo(date: Date): string {
 }
 
 function formatLabel(format: string): string {
-  const labels: Record<string, string> = { json: "JSON", avro: "Avro" };
+  const labels: Record<string, string> = { json: "JSON", avro: "Avro", protobuf: "Protobuf" };
   return labels[format?.toLowerCase()] ?? "Other";
 }
 
@@ -49,6 +49,7 @@ function formatBadgeClass(format: string): string {
   const classes: Record<string, string> = {
     json: "bg-emerald-500/10 text-emerald-500 border-emerald-500/20 text-[10px] px-1.5 py-0",
     avro: "bg-blue-500/10 text-blue-500 border-blue-500/20 text-[10px] px-1.5 py-0",
+    protobuf: "bg-amber-500/10 text-amber-500 border-amber-500/20 text-[10px] px-1.5 py-0",
   };
   return classes[format?.toLowerCase()] ?? "text-[10px] px-1.5 py-0";
 }
@@ -225,7 +226,7 @@ export function TopicsPage() {
                   <TableCell className="font-mono text-sm font-medium">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span>{topic.name}</span>
-                      {["json", "avro"].includes(topic.message_format?.toLowerCase()) && (
+                      {["json", "avro", "protobuf"].includes(topic.message_format?.toLowerCase()) && (
                         <Badge variant="outline" className={formatBadgeClass(topic.message_format)}>
                           {formatLabel(topic.message_format)}
                         </Badge>

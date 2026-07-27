@@ -120,9 +120,19 @@ describe("TopicsPage", () => {
     expect(screen.getByText("Avro")).toBeInTheDocument();
   });
 
+  test("topic format badge renders for protobuf", async () => {
+    mockFetchTopics.mockResolvedValueOnce([
+      makeTopic({ name: "proto-topic", message_format: "protobuf" }),
+    ]);
+    mockFetchClusters.mockResolvedValueOnce([]);
+    renderWithProviders(<TopicsPage />);
+
+    expect(await screen.findByText("Protobuf")).toBeInTheDocument();
+  });
+
   test("no badge for 'other' format", async () => {
     mockFetchTopics.mockResolvedValueOnce([
-      makeTopic({ name: "binary-topic", message_format: "protobuf" }),
+      makeTopic({ name: "binary-topic", message_format: "other" }),
     ]);
     mockFetchClusters.mockResolvedValueOnce([]);
     renderWithProviders(<TopicsPage />);

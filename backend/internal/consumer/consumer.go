@@ -454,8 +454,8 @@ func sanitizeBody(value []byte, dec *decoder.Decoder) ([]byte, string) {
 	}
 
 	if dec != nil && len(value) > 5 && value[0] == 0x00 {
-		if decoded, err := dec.Decode(value); err == nil {
-			return stripNullBytes(decoded), "avro"
+		if decoded, format, err := dec.Decode(value); err == nil {
+			return stripNullBytes(decoded), format
 		}
 	}
 

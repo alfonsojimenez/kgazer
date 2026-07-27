@@ -516,7 +516,7 @@ components:
           type: boolean
         message_format:
           type: string
-          enum: [avro, json, other, unknown]
+          enum: [avro, protobuf, json, other, unknown]
         message_count:
           type: integer
         key_count:

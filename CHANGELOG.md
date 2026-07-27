@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Protobuf message decoding via Schema Registry, alongside the existing Avro support — Confluent wire-format messages (magic byte + schema ID + message-index array) are compiled from the schema's in-memory `.proto` source using `bufbuild/protocompile` and decoded to JSON via `dynamicpb`/`protojson`
+- `protobuf` message format badge (amber) in the topics list and key browser, alongside the existing `json`/`avro` badges
+
+### Changed
+
+- `message_format` enum in the OpenAPI spec now includes `protobuf`
+
 ## [0.4.0] - 2026-04-30
 
 ### Added

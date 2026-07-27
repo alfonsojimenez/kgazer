@@ -5,12 +5,14 @@ go 1.25.0
 toolchain go1.26.1
 
 require (
+	github.com/bufbuild/protocompile v0.14.1
 	github.com/confluentinc/confluent-kafka-go/v2 v2.15.0
 	github.com/go-chi/chi/v5 v5.3.1
 	github.com/go-chi/cors v1.2.2
 	github.com/golang-migrate/migrate/v4 v4.19.1
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/linkedin/goavro/v2 v2.15.0
+	google.golang.org/protobuf v1.36.10
 	gopkg.in/yaml.v3 v3.0.1
 )
 

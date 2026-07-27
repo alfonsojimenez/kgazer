@@ -17,7 +17,7 @@ If you've ever needed to answer "what's the current value for this key?" or "wha
 - **Change timeline** — Interactive visual timeline showing when a key changed and how much
 - **Consumer group monitoring** — See which consumer groups are reading a topic, per-partition lag and consumer assignments
 - **Offset management** — Reset consumer group offsets to earliest, latest or specific per-partition values
-- **Avro support** — Automatic deserialisation via Schema Registry (Confluent-compatible)
+- **Avro & Protobuf support** — Automatic deserialisation via Schema Registry (Confluent-compatible)
 - **Topic lifecycle** — Detects new topics, cleans up deleted topics and handles topic recreation transparently
 - **Re-consume** — Wipe stored data and re-consume a topic from the beginning with one click
 - **Kubernetes deployment** — Helm chart with bundled PostgreSQL or external database support
@@ -289,7 +289,7 @@ One `kafka.Consumer` per cluster using **manual partition assignment** (no consu
 
 Messages are deserialised in this order:
 
-1. If Schema Registry is configured and the message has the Confluent wire format (`0x00` magic byte) → **Avro**
+1. If Schema Registry is configured and the message has the Confluent wire format (`0x00` magic byte) → **Avro** or **Protobuf**, depending on the schema's registered `schemaType`
 2. If the bytes are valid JSON → **JSON**
 3. Otherwise → base64-encoded as `{"_binary": "..."}`
 4. Null values (tombstones) → stored as JSON `null` with format `tombstone`
@@ -342,7 +342,7 @@ kgazer/
 │   │   ├── api/            # HTTP handlers (chi router)
 │   │   ├── config/         # YAML config loader with validation
 │   │   ├── consumer/       # Kafka consumer with dynamic topic assignment
-│   │   ├── decoder/        # Avro deserialisation via Schema Registry
+│   │   ├── decoder/        # Avro & Protobuf deserialisation via Schema Registry
 │   │   ├── progress/       # Consumption progress tracking
 │   │   ├── status/         # Cluster connection status
 │   │   ├── store/          # PostgreSQL data access layer
