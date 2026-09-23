@@ -193,7 +193,7 @@ export function KeysPage() {
     refetchIntervalInBackground: true,
   });
 
-  const { data: consumerGroups } = useQuery({
+  const { data: consumerGroups, isLoading: isConsumerGroupsLoading } = useQuery({
     queryKey: ["consumer-groups", topic, cluster],
     queryFn: () => fetchTopicConsumerGroups(topic!, cluster),
     enabled: !!topic,
@@ -307,7 +307,12 @@ export function KeysPage() {
           </div>
 
           <div className="h-5">
-            {consumerGroups && consumerGroups.length > 0 && (
+            {isConsumerGroupsLoading ? (
+              <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>Loading consumer groups…</span>
+              </span>
+            ) : consumerGroups && consumerGroups.length > 0 && (
               <Link
                 to={`/clusters/${encodeURIComponent(cluster!)}/topics/${encodeURIComponent(topic!)}/consumer-groups`}
                 className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors cursor-pointer"

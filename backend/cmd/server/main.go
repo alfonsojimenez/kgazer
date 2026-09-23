@@ -58,6 +58,13 @@ func main() {
 	tracker := status.NewTracker()
 	pt := progress.NewTracker()
 
+	admins, err := api.NewAdminClients(cfg.Kafka.Clusters)
+	if err != nil {
+		slog.Error("failed to create kafka admin clients", "error", err)
+		os.Exit(1)
+	}
+	defer admins.Close()
+
 	syncInterval := 60 * time.Second
 	for _, cluster := range cfg.Kafka.Clusters {
 		syncer.Start(ctx, cluster, s, tracker, cfg.KGazer.IsCompactedOnly(), syncInterval)
@@ -70,7 +77,7 @@ func main() {
 	}
 
 	startedAt := time.Now()
-	router := api.NewRouter(s, tracker, pt, cfg.Kafka.Clusters, version, startedAt, cfg)
+	router := api.NewRouter(s, tracker, pt, admins, version, startedAt, cfg)
 	addr := fmt.Sprintf(":%d", cfg.KGazer.Server.Port)
 
 	srv := &http.Server{

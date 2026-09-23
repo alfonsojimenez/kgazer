@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
@@ -23,7 +24,7 @@ import (
 	"github.com/alfonsojimenez/kgazer/backend/internal/store"
 )
 
-func NewRouter(s *store.Store, t *status.Tracker, pt *progress.Tracker, clusters []config.Cluster, version string, startedAt time.Time, cfg *config.Config) http.Handler {
+func NewRouter(s *store.Store, t *status.Tracker, pt *progress.Tracker, admins *AdminClients, version string, startedAt time.Time, cfg *config.Config) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(middleware.Logger)
@@ -53,9 +54,9 @@ func NewRouter(s *store.Store, t *status.Tracker, pt *progress.Tracker, clusters
 	r.Get("/api/settings/orphaned-clusters", handleOrphanedClusters(s, t))
 	r.Delete("/api/settings/clusters/{cluster}", handleDeleteClusterData(s))
 
-	r.Get("/api/topics/{topic}/consumer-groups", handleTopicConsumerGroups(clusters))
-	r.Get("/api/topics/{topic}/consumer-groups/{group}", handleConsumerGroupLag(clusters))
-	r.Post("/api/topics/{topic}/consumer-groups/{group}/reset-offsets", handleResetConsumerGroupOffsets(clusters))
+	r.Get("/api/topics/{topic}/consumer-groups", handleTopicConsumerGroups(admins))
+	r.Get("/api/topics/{topic}/consumer-groups/{group}", handleConsumerGroupLag(admins))
+	r.Post("/api/topics/{topic}/consumer-groups/{group}/reset-offsets", handleResetConsumerGroupOffsets(admins))
 
 	return r
 }
@@ -334,13 +335,49 @@ type consumerGroupLagDetail struct {
 	TotalLag      int64          `json:"total_lag"`
 }
 
-func findCluster(clusters []config.Cluster, name string) (config.Cluster, bool) {
-	for _, c := range clusters {
-		if c.Name == name {
-			return c, true
+// AdminClients holds one long-lived Kafka AdminClient per configured cluster,
+// created once at startup and reused across requests. Creating an AdminClient
+// bootstraps a broker connection and metadata handshake, so creating one per
+// HTTP request adds significant latency to every consumer-group lookup.
+// confluent-kafka-go's AdminClient (backed by librdkafka) is documented as
+// safe for concurrent use, so sharing one instance across concurrent request
+// handlers is safe.
+type AdminClients struct {
+	clients map[string]*kafka.AdminClient
+}
+
+// NewAdminClients creates one AdminClient per configured cluster.
+func NewAdminClients(clusters []config.Cluster) (*AdminClients, error) {
+	clients := make(map[string]*kafka.AdminClient, len(clusters))
+	for _, cluster := range clusters {
+		admin, err := createAdminClient(cluster)
+		if err != nil {
+			for _, c := range clients {
+				c.Close()
+			}
+			return nil, fmt.Errorf("creating admin client for cluster %s: %w", cluster.Name, err)
 		}
+		clients[cluster.Name] = admin
 	}
-	return config.Cluster{}, false
+	return &AdminClients{clients: clients}, nil
+}
+
+// Close closes all underlying admin clients. Call once during graceful shutdown.
+func (a *AdminClients) Close() {
+	if a == nil {
+		return
+	}
+	for _, c := range a.clients {
+		c.Close()
+	}
+}
+
+func (a *AdminClients) get(name string) (*kafka.AdminClient, bool) {
+	if a == nil {
+		return nil, false
+	}
+	admin, ok := a.clients[name]
+	return admin, ok
 }
 
 func createAdminClient(cluster config.Cluster) (*kafka.AdminClient, error) {
@@ -355,24 +392,23 @@ func createAdminClient(cluster config.Cluster) (*kafka.AdminClient, error) {
 	return kafka.NewAdminClient(cfg)
 }
 
-func handleTopicConsumerGroups(clusters []config.Cluster) http.HandlerFunc {
+// maxConcurrentGroupLookups bounds how many ListConsumerGroupOffsets calls
+// run in parallel when scanning every consumer group in the cluster for
+// activity on a topic. The confluent-kafka-go API only supports looking up
+// offsets for one consumer group per call, so without this the endpoint made
+// one sequential broker round-trip per consumer group in the cluster.
+const maxConcurrentGroupLookups = 16
+
+func handleTopicConsumerGroups(admins *AdminClients) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		topic := chi.URLParam(r, "topic")
 		clusterName := r.URL.Query().Get("cluster")
 
-		cluster, ok := findCluster(clusters, clusterName)
+		admin, ok := admins.get(clusterName)
 		if !ok {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "cluster not found in config"})
 			return
 		}
-
-		admin, err := createAdminClient(cluster)
-		if err != nil {
-			slog.Error("creating admin client", "error", err, "cluster", clusterName)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to connect to cluster"})
-			return
-		}
-		defer admin.Close()
 
 		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 		defer cancel()
@@ -433,56 +469,74 @@ func handleTopicConsumerGroups(clusters []config.Cluster) http.HandlerFunc {
 			return
 		}
 
-		var result []consumerGroupInfo
-		for _, desc := range descResult.ConsumerGroupDescriptions {
+		resultsByGroup := make([]*consumerGroupInfo, len(descResult.ConsumerGroupDescriptions))
+		sem := make(chan struct{}, maxConcurrentGroupLookups)
+		var wg sync.WaitGroup
+
+		for i, desc := range descResult.ConsumerGroupDescriptions {
 			if desc.Error.Code() != kafka.ErrNoError {
 				continue
 			}
 
-			activeOnTopic := 0
-			for _, member := range desc.Members {
-				for _, tp := range member.Assignment.TopicPartitions {
-					if tp.Topic != nil && *tp.Topic == topic {
-						activeOnTopic++
-						break
+			wg.Add(1)
+			sem <- struct{}{}
+			go func(i int, desc kafka.ConsumerGroupDescription) {
+				defer wg.Done()
+				defer func() { <-sem }()
+
+				activeOnTopic := 0
+				for _, member := range desc.Members {
+					for _, tp := range member.Assignment.TopicPartitions {
+						if tp.Topic != nil && *tp.Topic == topic {
+							activeOnTopic++
+							break
+						}
 					}
 				}
-			}
 
-			offsetResult, lagErr := admin.ListConsumerGroupOffsets(ctx, []kafka.ConsumerGroupTopicPartitions{{
-				Group: desc.GroupID, Partitions: partitions,
-			}})
+				offsetResult, lagErr := admin.ListConsumerGroupOffsets(ctx, []kafka.ConsumerGroupTopicPartitions{{
+					Group: desc.GroupID, Partitions: partitions,
+				}})
 
-			var totalLag int64
-			hasOffsets := false
-			if lagErr == nil && len(offsetResult.ConsumerGroupsTopicPartitions) > 0 {
-				for _, tp := range offsetResult.ConsumerGroupsTopicPartitions[0].Partitions {
-					if tp.Topic == nil || *tp.Topic != topic {
-						continue
-					}
-					end := endOffsets[tp.Partition]
-					var committed int64
-					if tp.Offset >= 0 {
-						hasOffsets = true
-						committed = int64(tp.Offset)
-					}
-					if lag := end - committed; lag > 0 {
-						totalLag += lag
+				var totalLag int64
+				hasOffsets := false
+				if lagErr == nil && len(offsetResult.ConsumerGroupsTopicPartitions) > 0 {
+					for _, tp := range offsetResult.ConsumerGroupsTopicPartitions[0].Partitions {
+						if tp.Topic == nil || *tp.Topic != topic {
+							continue
+						}
+						end := endOffsets[tp.Partition]
+						var committed int64
+						if tp.Offset >= 0 {
+							hasOffsets = true
+							committed = int64(tp.Offset)
+						}
+						if lag := end - committed; lag > 0 {
+							totalLag += lag
+						}
 					}
 				}
-			}
 
-			if activeOnTopic == 0 && !hasOffsets {
-				continue
-			}
+				if activeOnTopic == 0 && !hasOffsets {
+					return
+				}
 
-			result = append(result, consumerGroupInfo{
-				GroupID:       desc.GroupID,
-				MemberCount:   len(desc.Members),
-				State:         desc.State.String(),
-				ActiveOnTopic: activeOnTopic,
-				TotalLag:      totalLag,
-			})
+				resultsByGroup[i] = &consumerGroupInfo{
+					GroupID:       desc.GroupID,
+					MemberCount:   len(desc.Members),
+					State:         desc.State.String(),
+					ActiveOnTopic: activeOnTopic,
+					TotalLag:      totalLag,
+				}
+			}(i, desc)
+		}
+		wg.Wait()
+
+		var result []consumerGroupInfo
+		for _, info := range resultsByGroup {
+			if info != nil {
+				result = append(result, *info)
+			}
 		}
 
 		sort.Slice(result, func(i, j int) bool {
@@ -496,25 +550,17 @@ func handleTopicConsumerGroups(clusters []config.Cluster) http.HandlerFunc {
 	}
 }
 
-func handleConsumerGroupLag(clusters []config.Cluster) http.HandlerFunc {
+func handleConsumerGroupLag(admins *AdminClients) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		topic := chi.URLParam(r, "topic")
 		group := chi.URLParam(r, "group")
 		clusterName := r.URL.Query().Get("cluster")
 
-		cluster, ok := findCluster(clusters, clusterName)
+		admin, ok := admins.get(clusterName)
 		if !ok {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "cluster not found"})
 			return
 		}
-
-		admin, err := createAdminClient(cluster)
-		if err != nil {
-			slog.Error("creating admin client", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to connect to cluster"})
-			return
-		}
-		defer admin.Close()
 
 		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 		defer cancel()
@@ -635,7 +681,7 @@ func handleConsumerGroupLag(clusters []config.Cluster) http.HandlerFunc {
 	}
 }
 
-func handleResetConsumerGroupOffsets(clusters []config.Cluster) http.HandlerFunc {
+func handleResetConsumerGroupOffsets(admins *AdminClients) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		topic := chi.URLParam(r, "topic")
 		group := chi.URLParam(r, "group")
@@ -647,19 +693,11 @@ func handleResetConsumerGroupOffsets(clusters []config.Cluster) http.HandlerFunc
 			return
 		}
 
-		cluster, ok := findCluster(clusters, clusterName)
+		admin, ok := admins.get(clusterName)
 		if !ok {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "cluster not found"})
 			return
 		}
-
-		admin, err := createAdminClient(cluster)
-		if err != nil {
-			slog.Error("creating admin client", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to connect to cluster"})
-			return
-		}
-		defer admin.Close()
 
 		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 		defer cancel()
