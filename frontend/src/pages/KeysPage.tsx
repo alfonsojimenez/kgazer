@@ -9,7 +9,8 @@ import {
 
   fetchTopicConsumerGroups,
 } from "@/lib/api";
-import { parseSearch, buildSearch } from "@/lib/search-parser";
+import { parseSearch, buildSearch, filtersToJSON } from "@/lib/search-parser";
+import { FieldFilterPopover } from "@/components/FieldFilterPopover";
 import { cn } from "@/lib/utils";
 import {
   TableBody,
@@ -168,7 +169,7 @@ export function KeysPage() {
 
   const parsed = parseSearch(debouncedSearch);
   const hasValueFilters = Object.keys(parsed.filters).length > 0;
-  const valueFilter = hasValueFilters ? JSON.stringify(parsed.filters) : undefined;
+  const valueFilter = hasValueFilters ? filtersToJSON(parsed.filters) : undefined;
 
   const { data: topicDetail, isLoading: isDetailLoading } = useQuery({
     queryKey: ["topic-detail", topic, cluster],
@@ -400,13 +401,13 @@ export function KeysPage() {
           {showSuggestions && suggestions.length > 0 && (
             <div
               ref={suggestionsRef}
-              className="absolute top-full left-0 right-0 z-20 mt-1 rounded-md border bg-popover shadow-md"
+              className="absolute top-full left-0 z-20 mt-1 rounded-md border bg-popover shadow-md min-w-full w-max max-w-[32rem]"
             >
               {suggestions.map((field, i) => (
                 <button
                   key={field}
                   className={cn(
-                    "w-full px-3 py-1.5 text-left text-sm hover:bg-accent",
+                    "w-full px-3 py-1.5 text-left text-sm hover:bg-accent whitespace-nowrap overflow-hidden text-ellipsis",
                     i === suggestionIndex && "bg-accent",
                   )}
                   onMouseDown={(e) => {
@@ -461,6 +462,19 @@ export function KeysPage() {
             )}
           </PopoverContent>
         </Popover>
+        <FieldFilterPopover
+          fields={fields ?? []}
+          activeFilters={Object.entries(parsed.filters).map(([field, value]) => ({ field, value }))}
+          onAddFilter={(field, value) => {
+            const newParsed = { ...parsed, filters: { ...parsed.filters, [field]: value } };
+            setSearch(buildSearch(newParsed));
+          }}
+          onRemoveFilter={(field) => {
+            const newParsed = { ...parsed, filters: { ...parsed.filters } };
+            delete newParsed.filters[field];
+            setSearch(buildSearch(newParsed));
+          }}
+        />
         <Input
           placeholder="Offset…"
           value={offsetFilter}
@@ -486,9 +500,9 @@ export function KeysPage() {
       {hasValueFilters && (
         <div className="flex items-center gap-1.5 flex-wrap">
           {Object.entries(parsed.filters).map(([field, value]) => (
-            <Badge key={field} variant="secondary" className="gap-1 pl-2 pr-1 text-xs">
-              <span className="text-muted-foreground">{field}:</span>
-              <span>{value}</span>
+            <Badge key={field} variant="secondary" className="gap-1 pl-2 pr-1 text-xs max-w-96">
+              <span className="text-muted-foreground truncate" title={field}>{field}:</span>
+              <span className="truncate" title={value}>{value}</span>
               <button
                 className="ml-0.5 rounded-full hover:bg-muted p-0.5"
                 onClick={() => {

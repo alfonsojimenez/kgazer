@@ -9,6 +9,35 @@ interface PaginationProps {
 }
 
 export function Pagination({ page, total, limit, onPageChange }: PaginationProps) {
+  if (total === -1) {
+    const hasResults = true;
+    return (
+      <div className="flex items-center justify-between pt-4">
+        <span className="text-sm text-muted-foreground">
+          Many results
+        </span>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={page <= 1}
+            onClick={() => onPageChange(page - 1)}
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <span className="text-sm tabular-nums">{page}</span>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => onPageChange(page + 1)}
+          >
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   const totalPages = Math.max(1, Math.ceil(total / limit));
 
   if (totalPages <= 1) return null;

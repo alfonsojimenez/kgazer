@@ -133,6 +133,9 @@ func sync(ctx context.Context, cluster config.Cluster, s *store.Store, compacted
 	}
 
 	slog.Info("topic sync complete", "cluster", cluster.Name, "topics", count)
+
+	s.WritePool().Exec(ctx, `ANALYZE keys`)
+
 	return nil
 }
 

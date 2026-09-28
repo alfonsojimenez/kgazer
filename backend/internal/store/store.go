@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -468,22 +470,63 @@ func (s *Store) GetTopicFields(ctx context.Context, cluster, topic string) ([]st
 		return nil, fmt.Errorf("getting topic: %w", err)
 	}
 
-	query := `SELECT jsonb_object_keys(sub.body) FROM (SELECT body FROM keys WHERE topic_id = $1 AND body IS NOT NULL LIMIT 1) sub`
-	rows, err := s.pool.Query(ctx, query, topicID)
+	var body []byte
+	err = s.pool.QueryRow(ctx,
+		`SELECT body FROM keys WHERE topic_id = $1 AND body IS NOT NULL LIMIT 1`,
+		topicID).Scan(&body)
 	if err != nil {
-		return nil, fmt.Errorf("getting topic fields: %w", err)
+		return []string{}, nil
 	}
-	defer rows.Close()
 
-	var fields []string
-	for rows.Next() {
-		var f string
-		if err := rows.Scan(&f); err != nil {
-			return nil, fmt.Errorf("scanning field: %w", err)
-		}
-		fields = append(fields, f)
+	var data interface{}
+	if err := json.Unmarshal(body, &data); err != nil {
+		return []string{}, nil
 	}
-	return fields, rows.Err()
+
+	fields := extractFields(data, "")
+	if fields == nil {
+		fields = []string{}
+	}
+	return fields, nil
+}
+
+func extractFields(data interface{}, prefix string) []string {
+	var fields []string
+	switch v := data.(type) {
+	case map[string]interface{}:
+		for _, key := range sortedKeys(v) {
+			path := key
+			if prefix != "" {
+				path = prefix + "." + key
+			}
+			childFields := extractFields(v[key], path)
+			if len(childFields) > 0 {
+				fields = append(fields, childFields...)
+			} else {
+				fields = append(fields, path)
+			}
+		}
+	case []interface{}:
+		if len(v) > 0 {
+			fields = append(fields, extractFields(v[0], prefix+"[]")...)
+		} else {
+			fields = append(fields, prefix+"[]")
+		}
+	default:
+		if prefix != "" {
+			fields = append(fields, prefix)
+		}
+	}
+	return fields
+}
+
+func sortedKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func (s *Store) ListKeys(ctx context.Context, cluster, topic, search, sortBy, sortDir string, partitions []int, minOffset int64, valueFilter string, page, limit int) ([]KeySummary, int, error) {
@@ -542,43 +585,72 @@ func (s *Store) ListKeys(ctx context.Context, cluster, topic, search, sortBy, so
 	}
 
 	args = append(args, limit, pgOffset)
+	countArgs := args[:len(args)-2]
 
 	var total int
 	if !hasFilters {
 		total = keyCount
 	}
 
-	selectCols := "key, message_count, partition, offset_id, last_updated"
+	dataQuery := fmt.Sprintf(
+		"SELECT key, message_count, partition, offset_id, last_updated FROM keys %s ORDER BY %s LIMIT $%d OFFSET $%d",
+		where, orderBy, len(args)-1, len(args))
+
+	var (
+		keys    []KeySummary
+		dataErr error
+		countErr error
+		wg      sync.WaitGroup
+	)
+
 	if hasFilters {
-		selectCols = "key, message_count, partition, offset_id, last_updated, COUNT(*) OVER() AS total"
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			countCtx, cancel := context.WithTimeout(ctx, 1*time.Second)
+			defer cancel()
+			countQuery := fmt.Sprintf("SELECT COUNT(*) FROM keys %s", where)
+			countErr = s.pool.QueryRow(countCtx, countQuery, countArgs...).Scan(&total)
+			if countErr != nil {
+				total = -1
+				countErr = nil
+			}
+		}()
 	}
 
-	query := fmt.Sprintf(
-		"SELECT %s FROM keys %s ORDER BY %s LIMIT $%d OFFSET $%d",
-		selectCols, where, orderBy, len(args)-1, len(args))
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return nil, 0, fmt.Errorf("beginning tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
 
-	rows, err := s.pool.Query(ctx, query, args...)
+	if valueFilter != "" {
+		if _, err := tx.Exec(ctx, "SET LOCAL enable_bitmapscan = off"); err != nil {
+			return nil, 0, fmt.Errorf("setting enable_bitmapscan: %w", err)
+		}
+	}
+
+	rows, err := tx.Query(ctx, dataQuery, args...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("listing keys: %w", err)
 	}
 	defer rows.Close()
 
-	var keys []KeySummary
 	for rows.Next() {
 		var k KeySummary
-		if hasFilters {
-			if err := rows.Scan(&k.Key, &k.MessageCount, &k.Partition, &k.Offset, &k.LastUpdated, &total); err != nil {
-				return nil, 0, fmt.Errorf("scanning key: %w", err)
-			}
-		} else {
-			if err := rows.Scan(&k.Key, &k.MessageCount, &k.Partition, &k.Offset, &k.LastUpdated); err != nil {
-				return nil, 0, fmt.Errorf("scanning key: %w", err)
-			}
+		if err := rows.Scan(&k.Key, &k.MessageCount, &k.Partition, &k.Offset, &k.LastUpdated); err != nil {
+			return nil, 0, fmt.Errorf("scanning key: %w", err)
 		}
 		keys = append(keys, k)
 	}
+	dataErr = rows.Err()
 
-	return keys, total, rows.Err()
+	wg.Wait()
+	if countErr != nil {
+		return nil, 0, fmt.Errorf("counting keys: %w", countErr)
+	}
+
+	return keys, total, dataErr
 }
 
 func (s *Store) GetKeyHistory(ctx context.Context, cluster, topic, key string, page, limit int) ([]Message, int, error) {

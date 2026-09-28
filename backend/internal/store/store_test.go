@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"testing"
 	"time"
@@ -647,6 +648,168 @@ func TestIncrementTopicStats(t *testing.T) {
 		detail, _ := s.GetTopicDetail(ctx, "cluster-a", "orders")
 		if detail.MessageFormat != "other" {
 			t.Errorf("expected format=other for mixed formats, got %s", detail.MessageFormat)
+		}
+	})
+}
+
+func TestGetTopicFields(t *testing.T) {
+	s := setupTestDB(t)
+	ctx := context.Background()
+	cleanDB(t, s)
+
+	id, _, _ := s.UpsertTopic(ctx, "cluster-a", "spend-topic", 1, true, "tid-001")
+	now := time.Now()
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"spend":     17648.5,
+		"ownerId":   "2101498",
+		"periodId":  "2026-09",
+		"ownerType": "ppc_campaign",
+		"spendBreakdown": []map[string]interface{}{
+			{"type": "ga:click", "amount": 5659},
+			{"type": "ca:click", "amount": 11953.5},
+		},
+		"metadata": map[string]interface{}{
+			"source": "ad-platform",
+		},
+	})
+	s.UpsertKey(ctx, id, "key-1", 0, 0, now, body)
+
+	t.Run("returns nested field paths", func(t *testing.T) {
+		fields, err := s.GetTopicFields(ctx, "cluster-a", "spend-topic")
+		if err != nil {
+			t.Fatalf("GetTopicFields: %v", err)
+		}
+
+		expect := []string{
+			"metadata.source",
+			"ownerId",
+			"ownerType",
+			"periodId",
+			"spend",
+			"spendBreakdown[].amount",
+			"spendBreakdown[].type",
+		}
+		if len(fields) != len(expect) {
+			t.Fatalf("expected %d fields, got %d: %v", len(expect), len(fields), fields)
+		}
+		for i, f := range fields {
+			if f != expect[i] {
+				t.Errorf("field[%d]: expected %q, got %q", i, expect[i], f)
+			}
+		}
+	})
+
+	t.Run("topic not found", func(t *testing.T) {
+		_, err := s.GetTopicFields(ctx, "cluster-a", "nonexistent")
+		if err == nil {
+			t.Error("expected error for nonexistent topic")
+		}
+	})
+
+	t.Run("no body returns empty", func(t *testing.T) {
+		cleanDB(t, s)
+		s.UpsertTopic(ctx, "cluster-a", "empty-topic", 1, true, "tid-002")
+		fields, err := s.GetTopicFields(ctx, "cluster-a", "empty-topic")
+		if err != nil {
+			t.Fatalf("GetTopicFields: %v", err)
+		}
+		if len(fields) != 0 {
+			t.Errorf("expected 0 fields for empty topic, got %d", len(fields))
+		}
+	})
+}
+
+func TestListKeysValueFilter(t *testing.T) {
+	s := setupTestDB(t)
+	ctx := context.Background()
+	cleanDB(t, s)
+
+	id, _, _ := s.UpsertTopic(ctx, "cluster-a", "spend-topic", 1, true, "tid-001")
+	now := time.Now()
+
+	body1, _ := json.Marshal(map[string]interface{}{
+		"ownerId": "2101498",
+		"spendBreakdown": []map[string]interface{}{
+			{"type": "ga:click", "amount": 5659},
+			{"type": "ca:click", "amount": 11953.5},
+		},
+	})
+	body2, _ := json.Marshal(map[string]interface{}{
+		"ownerId": "2101499",
+		"spendBreakdown": []map[string]interface{}{
+			{"type": "sa:click", "amount": 36},
+		},
+	})
+	body3, _ := json.Marshal(map[string]interface{}{
+		"ownerId": "2101500",
+	})
+
+	s.UpsertKey(ctx, id, "key-ca", 0, 10, now, body1)
+	s.UpsertKey(ctx, id, "key-sa", 0, 20, now.Add(time.Second), body2)
+	s.UpsertKey(ctx, id, "key-no-breakdown", 0, 30, now.Add(2*time.Second), body3)
+
+	t.Run("flat value filter", func(t *testing.T) {
+		keys, total, err := s.ListKeys(ctx, "cluster-a", "spend-topic", "", "", "desc", nil, 0, `{"ownerId":"2101498"}`, 1, 50)
+		if err != nil {
+			t.Fatalf("ListKeys: %v", err)
+		}
+		if total != 1 {
+			t.Errorf("expected total=1, got %d", total)
+		}
+		if len(keys) != 1 {
+			t.Fatalf("expected 1 key, got %d", len(keys))
+		}
+		if keys[0].Key != "key-ca" {
+			t.Errorf("expected key-ca, got %s", keys[0].Key)
+		}
+	})
+
+	t.Run("nested array value filter", func(t *testing.T) {
+		keys, total, err := s.ListKeys(ctx, "cluster-a", "spend-topic", "", "", "desc", nil, 0, `{"spendBreakdown":[{"type":"ca:click"}]}`, 1, 50)
+		if err != nil {
+			t.Fatalf("ListKeys: %v", err)
+		}
+		if total != 1 {
+			t.Errorf("expected total=1, got %d", total)
+		}
+		if len(keys) != 1 {
+			t.Fatalf("expected 1 key, got %d", len(keys))
+		}
+		if keys[0].Key != "key-ca" {
+			t.Errorf("expected key-ca, got %s", keys[0].Key)
+		}
+	})
+
+	t.Run("nested array filter matches different element type", func(t *testing.T) {
+		keys, total, err := s.ListKeys(ctx, "cluster-a", "spend-topic", "", "", "desc", nil, 0, `{"spendBreakdown":[{"type":"sa:click"}]}`, 1, 50)
+		if err != nil {
+			t.Fatalf("ListKeys: %v", err)
+		}
+		if total != 1 {
+			t.Errorf("expected total=1, got %d", total)
+		}
+		if len(keys) != 1 {
+			t.Fatalf("expected 1 key, got %d", len(keys))
+		}
+		if keys[0].Key != "key-sa" {
+			t.Errorf("expected key-sa, got %s", keys[0].Key)
+		}
+	})
+
+	t.Run("nested object value filter", func(t *testing.T) {
+		keys, total, err := s.ListKeys(ctx, "cluster-a", "spend-topic", "", "", "desc", nil, 0, `{"ownerId":"2101500"}`, 1, 50)
+		if err != nil {
+			t.Fatalf("ListKeys: %v", err)
+		}
+		if total != 1 {
+			t.Errorf("expected total=1, got %d", total)
+		}
+		if len(keys) != 1 {
+			t.Fatalf("expected 1 key, got %d", len(keys))
+		}
+		if keys[0].Key != "key-no-breakdown" {
+			t.Errorf("expected key-no-breakdown, got %s", keys[0].Key)
 		}
 	})
 }
