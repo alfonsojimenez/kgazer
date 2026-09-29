@@ -400,7 +400,7 @@ cd backend
 go run ./cmd/server
 ```
 
-Requires Go 1.25+, librdkafka, and a running PostgreSQL instance.
+Requires Go 1.26+, librdkafka, and a running PostgreSQL instance.
 
 **Frontend:**
 
