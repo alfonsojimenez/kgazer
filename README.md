@@ -4,6 +4,10 @@
 
 <p align="center"><strong>Kafka Compacted Topic Explorer</strong></p>
 
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/49298681-24bc-4ebc-a304-ce68c3f1b07e" alt="KGazer screenshot" />
+</p>
+
 KGazer is a developer tool for exploring and inspecting [Kafka compacted topics](https://kafka.apache.org/documentation/#compaction). It continuously consumes messages from your Kafka clusters, stores them in PostgreSQL and provides a web interface to browse keys, view message history and compare changes over time.
 
 If you've ever needed to answer "what's the current value for this key?" or "what changed in this key's history?", KGazer gives you that visibility without writing throwaway consumer scripts.
