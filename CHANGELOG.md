@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-09-29
+
+### Added
+
+- Nested key filtering with field picker UI for searching message values at any JSON nesting depth
+- KGazer screenshot in README
+
+### Changed
+
+- Optimized filtered search performance for nested value queries
+- Upgraded Go toolchain from 1.25 to 1.26 and Dockerfile base image to `golang:1.26-alpine`
+- Updated backend Go dependencies (golang.org/x/sync v0.23.0, golang.org/x/text v0.42.0)
+- Updated frontend dependencies (@testing-library/jest-dom 7, vitest 5, and minor/patch updates across all packages)
+- Replaced `__dirname` with `import.meta.dirname` in Vite and Vitest configs for Vitest 5 compatibility
+
 ## [1.1.0] - 2026-09-23
 
 ### Added
@@ -105,6 +120,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - CI pipeline (Go tests, TypeScript checks and Vitest)
 - Release pipeline (GHCR image publish on tag push)
 
+[1.2.0]: https://github.com/alfonsojimenez/kgazer/compare/v1.1.0...v1.2.0
+[1.1.0]: https://github.com/alfonsojimenez/kgazer/compare/v0.4.0...v1.1.0
 [0.4.0]: https://github.com/alfonsojimenez/kgazer/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/alfonsojimenez/kgazer/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/alfonsojimenez/kgazer/compare/v0.1.1...v0.2.0
