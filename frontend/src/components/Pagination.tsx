@@ -10,7 +10,6 @@ interface PaginationProps {
 
 export function Pagination({ page, total, limit, onPageChange }: PaginationProps) {
   if (total === -1) {
-    const hasResults = true;
     return (
       <div className="flex items-center justify-between pt-4">
         <span className="text-sm text-muted-foreground">
