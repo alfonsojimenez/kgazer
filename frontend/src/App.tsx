@@ -1,5 +1,7 @@
-import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
+import { fetchClusters } from "@/lib/api";
+import { Skeleton } from "@/components/ui/skeleton";
 import { TopicsPage } from "@/pages/TopicsPage";
 import { KeysPage } from "@/pages/KeysPage";
 import { HistoryPage } from "@/pages/HistoryPage";
@@ -29,13 +31,27 @@ function Layout({ children }: { children: React.ReactNode }) {
   );
 }
 
+function HomeRedirect() {
+  const { data: clusters, isLoading } = useQuery({
+    queryKey: ["clusters"],
+    queryFn: fetchClusters,
+  });
+
+  if (isLoading) return <Skeleton className="h-8 w-64" />;
+
+  const first = clusters?.map((c) => c.name).sort((a, b) => a.localeCompare(b))[0];
+  if (!first) return <TopicsPage />;
+
+  return <Navigate to={`/clusters/${encodeURIComponent(first)}`} replace />;
+}
+
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <Layout>
           <Routes>
-            <Route path="/" element={<TopicsPage />} />
+            <Route path="/" element={<HomeRedirect />} />
             <Route path="/clusters/:cluster" element={<TopicsPage />} />
             <Route path="/clusters/:cluster/topics/:topic/keys" element={<KeysPage />} />
             <Route path="/clusters/:cluster/topics/:topic/keys/:key" element={<HistoryPage />} />

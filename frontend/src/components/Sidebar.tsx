@@ -1,19 +1,14 @@
-import { useEffect, useMemo } from "react";
+import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link, useLocation, useNavigate } from "react-router-dom";
-import { fetchClusters, fetchHealth, type ClusterInfo } from "@/lib/api";
+import { Link, useNavigate } from "react-router-dom";
+import { fetchClusters, fetchHealth } from "@/lib/api";
 import { Skeleton } from "@/components/ui/skeleton";
+import { StatusDot } from "@/components/StatusDot";
 import { Settings } from "lucide-react";
 
 interface SidebarProps {
   activeCluster: string | null;
 }
-
-const STATUS_DOT: Record<ClusterInfo["status"], string> = {
-  connected: "bg-[#22c55e]",
-  connecting: "bg-[#f59e0b] animate-pulse",
-  disconnected: "bg-[#ef4444]",
-};
 
 export function Sidebar({ activeCluster }: SidebarProps) {
   const navigate = useNavigate();
@@ -32,14 +27,6 @@ export function Sidebar({ activeCluster }: SidebarProps) {
     () => clusters ? [...clusters].sort((a, b) => a.name.localeCompare(b.name)) : [],
     [clusters],
   );
-
-  const location = useLocation();
-
-  useEffect(() => {
-    if (!activeCluster && sorted.length > 0 && location.pathname === "/") {
-      navigate(`/clusters/${encodeURIComponent(sorted[0].name)}`, { replace: true });
-    }
-  }, [activeCluster, sorted, navigate, location.pathname]);
 
   return (
     <aside className="w-56 shrink-0 border-r border-sidebar-border bg-sidebar-background sticky top-0 h-screen overflow-y-auto flex flex-col">
@@ -76,9 +63,7 @@ export function Sidebar({ activeCluster }: SidebarProps) {
                 : "text-sidebar-foreground hover:bg-sidebar-accent/50"
             }`}
           >
-            <span
-              className={`h-2 w-2 shrink-0 rounded-full ${STATUS_DOT[cluster.status]}`}
-            />
+            <StatusDot status={cluster.status} />
             {cluster.name}
           </button>
         ))}

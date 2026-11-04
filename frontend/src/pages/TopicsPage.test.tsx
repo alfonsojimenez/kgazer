@@ -9,6 +9,7 @@ import type { TopicSummary, ClusterInfo } from "@/lib/api";
 vi.mock("@/lib/api", () => ({
   fetchTopics: vi.fn(),
   fetchClusters: vi.fn(),
+  fetchSettingsInfo: vi.fn().mockResolvedValue({ config: { compacted_only: true } }),
 }));
 
 import { fetchTopics, fetchClusters } from "@/lib/api";
@@ -184,5 +185,134 @@ describe("TopicsPage", () => {
     renderWithProviders(<TopicsPage />);
 
     expect(await screen.findByText(/Failed to load topics/)).toBeInTheDocument();
+    expect(screen.queryByText("No topics found")).not.toBeInTheDocument();
+  });
+
+  test("topic names are links to the keys page", async () => {
+    mockFetchTopics.mockResolvedValueOnce([makeTopic({ name: "orders" })]);
+    mockFetchClusters.mockResolvedValueOnce([]);
+    renderWithProviders(<TopicsPage />);
+
+    const link = await screen.findByRole("link", { name: "orders" });
+    expect(link).toHaveAttribute("href", "/clusters/test-cluster/topics/orders/keys");
+  });
+
+  test("search is read from the URL", async () => {
+    mockFetchTopics.mockResolvedValueOnce([
+      makeTopic({ name: "orders" }),
+      makeTopic({ name: "payments" }),
+    ]);
+    mockFetchClusters.mockResolvedValueOnce([]);
+    renderWithProviders(<TopicsPage />, { route: "/clusters/test-cluster?q=pay" });
+
+    expect(await screen.findByText("payments")).toBeInTheDocument();
+    expect(screen.queryByText("orders")).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/Search topics/)).toHaveValue("pay");
+  });
+
+  test("escape clears the search", async () => {
+    const user = userEvent.setup();
+    mockFetchTopics.mockResolvedValueOnce([makeTopic({ name: "orders" })]);
+    mockFetchClusters.mockResolvedValueOnce([]);
+    renderWithProviders(<TopicsPage />, { route: "/clusters/test-cluster?q=zzz" });
+
+    const input = await screen.findByPlaceholderText(/Search topics/);
+    await user.click(input);
+    await user.keyboard("{Escape}");
+
+    expect(input).toHaveValue("");
+    expect(screen.getByText("orders")).toBeInTheDocument();
+  });
+
+  test("clear button clears the search", async () => {
+    const user = userEvent.setup();
+    mockFetchTopics.mockResolvedValueOnce([makeTopic({ name: "orders" })]);
+    mockFetchClusters.mockResolvedValueOnce([]);
+    renderWithProviders(<TopicsPage />, { route: "/clusters/test-cluster?q=zzz" });
+
+    await user.click(await screen.findByRole("button", { name: "Clear search" }));
+
+    expect(screen.getByPlaceholderText(/Search topics/)).toHaveValue("");
+  });
+
+  test("sorts by message count", async () => {
+    const user = userEvent.setup();
+    mockFetchTopics.mockResolvedValueOnce([
+      makeTopic({ name: "small", message_count: 1 }),
+      makeTopic({ name: "big", message_count: 999 }),
+      makeTopic({ name: "medium", message_count: 50 }),
+    ]);
+    mockFetchClusters.mockResolvedValueOnce([]);
+    renderWithProviders(<TopicsPage />);
+
+    await screen.findByText("small");
+    await user.click(screen.getByText("Messages"));
+
+    const names = screen.getAllByRole("link").map((a) => a.textContent);
+    expect(names).toEqual(["big", "medium", "small"]);
+  });
+
+  test("shows syncing progress only for topics still consuming", async () => {
+    mockFetchTopics.mockResolvedValueOnce([
+      makeTopic({ name: "done-topic" }),
+      makeTopic({ name: "sync-topic", progress: { total: 1000, consumed: 400, percent: 40, done: false } }),
+    ]);
+    mockFetchClusters.mockResolvedValueOnce([]);
+    renderWithProviders(<TopicsPage />);
+
+    expect(await screen.findByText(/40% · 600 left/)).toBeInTheDocument();
+    expect(screen.getByText(/1 syncing/)).toBeInTheDocument();
+    expect(screen.queryByText("Done")).not.toBeInTheDocument();
+  });
+
+  test("explains empty state for disconnected cluster", async () => {
+    mockFetchTopics.mockResolvedValueOnce([]);
+    mockFetchClusters.mockResolvedValueOnce([
+      { name: "test-cluster", status: "disconnected", paused: false },
+    ]);
+    renderWithProviders(<TopicsPage />);
+
+    expect(await screen.findByText("Can't reach test-cluster")).toBeInTheDocument();
+  });
+
+  test("explains empty state for paused cluster", async () => {
+    mockFetchTopics.mockResolvedValueOnce([]);
+    mockFetchClusters.mockResolvedValueOnce([
+      { name: "test-cluster", status: "connected", paused: true },
+    ]);
+    renderWithProviders(<TopicsPage />);
+
+    expect(await screen.findByText("Consumption is paused for test-cluster")).toBeInTheDocument();
+  });
+
+  test("mentions compactedOnly in empty state", async () => {
+    mockFetchTopics.mockResolvedValueOnce([]);
+    mockFetchClusters.mockResolvedValueOnce([
+      { name: "test-cluster", status: "connected", paused: false },
+    ]);
+    renderWithProviders(<TopicsPage />);
+
+    expect(await screen.findByText(/Only compacted topics are shown/)).toBeInTheDocument();
+  });
+
+  test("status dot has an accessible label", async () => {
+    mockFetchTopics.mockResolvedValueOnce([]);
+    mockFetchClusters.mockResolvedValueOnce([
+      { name: "test-cluster", status: "connected", paused: false },
+    ]);
+    renderWithProviders(<TopicsPage />);
+
+    expect(await screen.findByRole("img", { name: "Connected" })).toBeInTheDocument();
+  });
+
+  test("virtualizes large topic lists", async () => {
+    mockFetchTopics.mockResolvedValueOnce(
+      Array.from({ length: 1000 }, (_, i) => makeTopic({ name: `topic-${i}` }))
+    );
+    mockFetchClusters.mockResolvedValueOnce([]);
+    renderWithProviders(<TopicsPage />);
+
+    await screen.findByText(/1000 topics/);
+    expect(screen.queryAllByRole("link").length).toBeLessThan(1000);
   });
 });

@@ -66,6 +66,17 @@ describe("Sidebar", () => {
     expect(prodBtn.closest("button")!.className).toContain("bg-primary");
   });
 
+  test("status dots have accessible labels", async () => {
+    mockFetchClusters.mockResolvedValueOnce([
+      { name: "prod", status: "connected", paused: false },
+      { name: "staging", status: "disconnected", paused: false },
+    ]);
+    renderSidebar();
+
+    expect(await screen.findByRole("img", { name: "Connected" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Disconnected" })).toBeInTheDocument();
+  });
+
   test("Settings link renders at the bottom", () => {
     mockFetchClusters.mockResolvedValueOnce([]);
     renderSidebar();
