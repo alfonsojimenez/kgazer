@@ -8,9 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ### Added
 
-- Point-in-time view: a date/time picker on the key browser shows every key as it was at that instant (latest version at or before it, keys tombstoned by then hidden), backed by a new `as_of` parameter on `GET /api/topics/{topic}/keys`
+- Point-in-time view: a date/time picker on the key browser shows every key as it was at that instant (latest version at or before it, keys tombstoned by then hidden unless the Deleted filter is selected), backed by a new `as_of` parameter on `GET /api/topics/{topic}/keys`
 - Key comparison page (`/compare`) that diffs the latest value of two keys across topics or clusters, reachable from the sidebar and from "Compare with…" on the history page; the selection lives in the URL so comparisons can be shared
 - Kafka record headers are now stored (new nullable `messages.headers` JSONB column, migration 007) and shown in a collapsible section on each version in the message history; history responses include a `headers` array. Messages consumed before this change show no headers until the topic is re-consumed
+- Deletion tracking: keys now record `deleted_at` when their latest version is a tombstone (migration 008, backfilled from existing data, cleared when the key is re-created). The key browser gains an All / Live / Deleted filter, a "Deleted N ago" badge on tombstoned keys and a Deleted Keys count on the topic card; the API adds `status` and `sort_by=deleted_at` to the keys endpoint and `deleted_keys` to topic detail
 
 ## [1.2.0] - 2026-09-29
 

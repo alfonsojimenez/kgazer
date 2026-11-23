@@ -6,6 +6,7 @@ import {
   fetchKeys,
   fetchTopicDetail,
   reconsumeTopics,
+  type KeyStatus,
 
   fetchTopicConsumerGroups,
 } from "@/lib/api";
@@ -40,7 +41,7 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Pagination } from "@/components/Pagination";
 import { Progress } from "@/components/ui/progress";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
-import { Search, RotateCcw, Loader2, ArrowDown, ArrowUp, Check, Users, Filter, X, History } from "lucide-react";
+import { Search, RotateCcw, Loader2, ArrowDown, ArrowUp, Check, Users, Filter, X, History, Trash2 } from "lucide-react";
 
 const FORMAT_BADGE_CLASSES: Record<string, string> = {
   json: "bg-emerald-500/10 text-emerald-500 border-emerald-500/20",
@@ -114,6 +115,7 @@ export function KeysPage() {
   const [offsetFilter, setOffsetFilter] = useState("");
   const [debouncedOffset, setDebouncedOffset] = useState(0);
   const [asOfInput, setAsOfInput] = useState("");
+  const [keyStatus, setKeyStatus] = useState<KeyStatus>("");
   const [partitionPopoverOpen, setPartitionPopoverOpen] = useState(false);
   const [reconsumeOpen, setReconsumeOpen] = useState(false);
 
@@ -146,7 +148,7 @@ export function KeysPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [selectedPartitions, asOfInput]);
+  }, [selectedPartitions, asOfInput, keyStatus]);
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -167,10 +169,12 @@ export function KeysPage() {
     (search ? 1 : 0) +
     (selectedPartitions.length > 0 ? 1 : 0) +
     (offsetFilter ? 1 : 0) +
-    (asOfInput ? 1 : 0);
+    (asOfInput ? 1 : 0) +
+    (keyStatus ? 1 : 0);
 
   const asOfDate = asOfInput ? new Date(asOfInput) : null;
   const asOf = asOfDate && !isNaN(asOfDate.getTime()) ? asOfDate.toISOString() : undefined;
+  const effectiveStatus: KeyStatus = keyStatus || (asOf ? "live" : "");
 
   const parsed = parseSearch(debouncedSearch);
   const hasValueFilters = Object.keys(parsed.filters).length > 0;
@@ -192,8 +196,8 @@ export function KeysPage() {
   });
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ["keys", topic, cluster, debouncedSearch, sortBy, sortDir, page, selectedPartitions, debouncedOffset, asOf],
-    queryFn: () => fetchKeys(topic!, cluster, parsed.text || undefined, sortBy, sortDir, page, limit, selectedPartitions.length > 0 ? selectedPartitions : undefined, debouncedOffset || undefined, valueFilter, asOf),
+    queryKey: ["keys", topic, cluster, debouncedSearch, sortBy, sortDir, page, selectedPartitions, debouncedOffset, asOf, effectiveStatus],
+    queryFn: () => fetchKeys(topic!, cluster, parsed.text || undefined, sortBy, sortDir, page, limit, selectedPartitions.length > 0 ? selectedPartitions : undefined, debouncedOffset || undefined, valueFilter, asOf, effectiveStatus),
     enabled: !!topic,
     refetchInterval: asOf ? false : 5_000,
     refetchIntervalInBackground: true,
@@ -264,7 +268,7 @@ export function KeysPage() {
             )}
           </div>
 
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-6">
             <div>
               <p className="text-muted-foreground text-xs uppercase tracking-wide">Cluster</p>
               <p className="text-lg font-semibold tabular-nums">{topicDetail.cluster}</p>
@@ -280,6 +284,18 @@ export function KeysPage() {
             <div>
               <p className="text-muted-foreground text-xs uppercase tracking-wide">Unique Keys</p>
               <p className="text-lg font-semibold tabular-nums">{topicDetail.unique_keys.toLocaleString()}</p>
+            </div>
+            <div>
+              <p className="text-muted-foreground text-xs uppercase tracking-wide">Deleted Keys</p>
+              <button
+                type="button"
+                className="text-lg font-semibold tabular-nums hover:underline cursor-pointer disabled:cursor-default disabled:no-underline"
+                disabled={topicDetail.deleted_keys === 0}
+                onClick={() => setKeyStatus("deleted")}
+                title="Show deleted keys"
+              >
+                {topicDetail.deleted_keys.toLocaleString()}
+              </button>
             </div>
             <div>
               <p className="text-muted-foreground text-xs uppercase tracking-wide">Progress</p>
@@ -480,6 +496,22 @@ export function KeysPage() {
             setSearch(buildSearch(newParsed));
           }}
         />
+        <div className="inline-flex rounded-md border p-0.5" role="group" aria-label="Key status">
+          {([["", "All"], ["live", "Live"], ["deleted", "Deleted"]] as const).map(([value, label]) => (
+            <button
+              key={label}
+              type="button"
+              aria-pressed={effectiveStatus === value}
+              onClick={() => setKeyStatus(value)}
+              className={cn(
+                "px-2.5 h-7 text-xs rounded-sm cursor-pointer transition-colors",
+                effectiveStatus === value ? "bg-accent text-foreground font-medium" : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
         <Input
           placeholder="Offset…"
           value={offsetFilter}
@@ -506,6 +538,7 @@ export function KeysPage() {
               setSelectedPartitions([]);
               setOffsetFilter("");
               setAsOfInput("");
+              setKeyStatus("");
             }}
           >
             <X className="h-3.5 w-3.5" />
@@ -540,7 +573,7 @@ export function KeysPage() {
           <History className="h-4 w-4 shrink-0" />
           <span>
             Snapshot as of <span className="font-medium">{asOfDate.toLocaleString()}</span> — each key shows its
-            latest version at that moment; keys deleted by then are hidden.
+            latest version at that moment{effectiveStatus === "live" && "; keys deleted by then are hidden"}.
           </span>
           <Button variant="ghost" size="sm" className="ml-auto h-7 text-blue-500" onClick={() => setAsOfInput("")}>
             Back to live
@@ -615,9 +648,13 @@ export function KeysPage() {
                 {data?.data.length === 0 && !isLoading && (
                   <TableRow>
                     <TableCell colSpan={5} className="h-32 text-center">
-                      {debouncedSearch || asOf ? (
+                      {debouncedSearch || asOf || keyStatus ? (
                         <span className="text-muted-foreground">
-                          {asOf && !debouncedSearch ? "No keys existed at this point in time" : "No keys match your search"}
+                          {keyStatus === "deleted" && !debouncedSearch
+                            ? "No deleted keys"
+                            : asOf && !debouncedSearch
+                              ? "No keys existed at this point in time"
+                              : "No keys match your search"}
                         </span>
                       ) : (
                         <div className="flex flex-col items-center gap-3">
@@ -642,8 +679,20 @@ export function KeysPage() {
                       )
                     }
                   >
-                     <TableCell className="font-mono text-sm font-medium">
-                      {parsed.text ? highlightMatch(k.key, parsed.text) : k.key}
+                    <TableCell className="font-mono text-sm font-medium">
+                      <span className={cn(k.deleted_at && "text-muted-foreground line-through decoration-red-500/60")}>
+                        {parsed.text ? highlightMatch(k.key, parsed.text) : k.key}
+                      </span>
+                      {k.deleted_at && (
+                        <Badge
+                          variant="outline"
+                          className="ml-2 gap-1 bg-red-500/10 text-red-500 border-red-500/20 text-[10px] font-sans no-underline"
+                          title={`Deleted ${new Date(k.deleted_at).toLocaleString()}`}
+                        >
+                          <Trash2 className="h-2.5 w-2.5" />
+                          Deleted {timeAgo(new Date(k.deleted_at))}
+                        </Badge>
+                      )}
                     </TableCell>
                     <TableCell className="text-right">
                       <Badge variant="secondary" className="tabular-nums">

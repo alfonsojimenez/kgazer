@@ -60,6 +60,7 @@ func setupTestDB(t *testing.T) *Store {
 			offset_id     BIGINT NOT NULL DEFAULT 0,
 			last_updated  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			body          JSONB,
+			deleted_at    TIMESTAMPTZ,
 			UNIQUE(topic_id, key)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_keys_topic_id_last_updated ON keys(topic_id, last_updated DESC)`,
@@ -835,7 +836,7 @@ func TestListKeysAsOf(t *testing.T) {
 
 	listAt := func(t *testing.T, at time.Time, valueFilter string) map[string]KeySummary {
 		t.Helper()
-		keys, total, err := s.ListKeys(ctx, "cluster-a", "snapshots", ListKeysParams{AsOf: &at, ValueFilter: valueFilter, Page: 1, Limit: 50})
+		keys, total, err := s.ListKeys(ctx, "cluster-a", "snapshots", ListKeysParams{AsOf: &at, ValueFilter: valueFilter, Status: KeyStatusLive, Page: 1, Limit: 50})
 		if err != nil {
 			t.Fatalf("ListKeys: %v", err)
 		}
@@ -872,6 +873,17 @@ func TestListKeysAsOf(t *testing.T) {
 		}
 		if len(got) != 2 {
 			t.Errorf("expected keys a and c, got %v", got)
+		}
+	})
+
+	t.Run("deleted status returns keys tombstoned by then", func(t *testing.T) {
+		at := t0.Add(3 * time.Hour)
+		keys, _, err := s.ListKeys(ctx, "cluster-a", "snapshots", ListKeysParams{AsOf: &at, Status: KeyStatusDeleted, Page: 1, Limit: 50})
+		if err != nil {
+			t.Fatalf("ListKeys: %v", err)
+		}
+		if len(keys) != 1 || keys[0].Key != "b" || keys[0].DeletedAt == nil || !keys[0].DeletedAt.Equal(t0.Add(2*time.Hour)) {
+			t.Errorf("expected b deleted at t0+2h, got %+v", keys)
 		}
 	})
 
@@ -916,4 +928,71 @@ func TestGetKeyHistoryHeaders(t *testing.T) {
 	if string(history[1].Headers) != "[]" {
 		t.Errorf("expected empty headers array for message without headers, got %s", history[1].Headers)
 	}
+}
+
+func TestTombstoneTracking(t *testing.T) {
+	s := setupTestDB(t)
+	ctx := context.Background()
+	cleanDB(t, s)
+
+	id, _, _ := s.UpsertTopic(ctx, "cluster-a", "tombstones", 1, true, "tid-ts")
+	t0 := time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC)
+	upsert := func(t *testing.T, key string, offset int64, ts time.Time, body string) {
+		t.Helper()
+		err := s.UpsertKeyBatch(ctx, []KeyEntry{{TopicID: id, Key: key, Count: 1, Partition: 0, Offset: offset, Timestamp: ts, Body: []byte(body)}})
+		if err != nil {
+			t.Fatalf("UpsertKeyBatch: %v", err)
+		}
+	}
+	list := func(t *testing.T, status string) []KeySummary {
+		t.Helper()
+		keys, total, err := s.ListKeys(ctx, "cluster-a", "tombstones", ListKeysParams{Status: status, Page: 1, Limit: 50})
+		if err != nil {
+			t.Fatalf("ListKeys: %v", err)
+		}
+		if total != len(keys) {
+			t.Errorf("expected total=%d, got %d", len(keys), total)
+		}
+		return keys
+	}
+
+	upsert(t, "alive", 0, t0, `{"v":1}`)
+	upsert(t, "gone", 1, t0, `{"v":1}`)
+	upsert(t, "gone", 2, t0.Add(time.Hour), `null`)
+	if err := s.IncrementTopicStats(ctx, id, 3, 2, t0.Add(time.Hour), "json"); err != nil {
+		t.Fatalf("IncrementTopicStats: %v", err)
+	}
+
+	t.Run("tombstone sets deleted_at to the tombstone timestamp", func(t *testing.T) {
+		deleted := list(t, KeyStatusDeleted)
+		if len(deleted) != 1 || deleted[0].Key != "gone" || deleted[0].DeletedAt == nil || !deleted[0].DeletedAt.Equal(t0.Add(time.Hour)) {
+			t.Fatalf("expected gone deleted at t0+1h, got %+v", deleted)
+		}
+	})
+
+	t.Run("live excludes deleted keys and all includes them", func(t *testing.T) {
+		if live := list(t, KeyStatusLive); len(live) != 1 || live[0].Key != "alive" || live[0].DeletedAt != nil {
+			t.Errorf("expected only alive, got %+v", live)
+		}
+		if all := list(t, KeyStatusAll); len(all) != 2 {
+			t.Errorf("expected 2 keys, got %+v", all)
+		}
+	})
+
+	t.Run("topic detail counts deleted keys", func(t *testing.T) {
+		d, err := s.GetTopicDetail(ctx, "cluster-a", "tombstones")
+		if err != nil {
+			t.Fatalf("GetTopicDetail: %v", err)
+		}
+		if d.DeletedKeys != 1 {
+			t.Errorf("expected 1 deleted key, got %d", d.DeletedKeys)
+		}
+	})
+
+	t.Run("re-creating a key clears deleted_at", func(t *testing.T) {
+		upsert(t, "gone", 3, t0.Add(2*time.Hour), `{"v":2}`)
+		if deleted := list(t, KeyStatusDeleted); len(deleted) != 0 {
+			t.Errorf("expected no deleted keys, got %+v", deleted)
+		}
+	})
 }

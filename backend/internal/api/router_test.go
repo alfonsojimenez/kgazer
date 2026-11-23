@@ -63,7 +63,7 @@ func setupTestStore(t *testing.T) *store.Store {
 			id SERIAL PRIMARY KEY, topic_id INT NOT NULL REFERENCES topics(id),
 			key TEXT NOT NULL, message_count INT NOT NULL DEFAULT 1, partition INT NOT NULL DEFAULT 0,
 			offset_id BIGINT NOT NULL DEFAULT 0, last_updated TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-			body JSONB, UNIQUE(topic_id, key))`,
+			body JSONB, deleted_at TIMESTAMPTZ, UNIQUE(topic_id, key))`,
 	}
 	for _, m := range migrations {
 		if _, err := pool.Exec(ctx, m); err != nil {

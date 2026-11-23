@@ -106,6 +106,7 @@ func handleGetTopicDetail(s *store.Store, pt *progress.Tracker) http.HandlerFunc
 			"message_format":    detail.MessageFormat,
 			"consumed_messages": detail.ConsumedMessages,
 			"unique_keys":       detail.UniqueKeys,
+			"deleted_keys":      detail.DeletedKeys,
 			"progress":          p,
 		})
 	}
@@ -194,8 +195,15 @@ func handleListKeys(s *store.Store) http.HandlerFunc {
 			Partitions:  partitions,
 			MinOffset:   minOffset,
 			ValueFilter: r.URL.Query().Get("value_filter"),
+			Status:      r.URL.Query().Get("status"),
 			Page:        page,
 			Limit:       limit,
+		}
+		switch params.Status {
+		case store.KeyStatusAll, store.KeyStatusLive, store.KeyStatusDeleted:
+		default:
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "status must be 'live' or 'deleted'"})
+			return
 		}
 		if v := r.URL.Query().Get("as_of"); v != "" {
 			asOf, err := time.Parse(time.RFC3339, v)

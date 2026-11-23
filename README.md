@@ -19,6 +19,7 @@ If you've ever needed to answer "what's the current value for this key?" or "wha
 - **Key value search** — Search message values using `field:value` syntax with field autocomplete
 - **Message history** — View every version of a key with syntax-highlighted JSON, record headers and inline diffs
 - **Change timeline** — Interactive visual timeline showing when a key changed and how much
+- **Deletion tracking** — See which keys were tombstoned and when, filter the key browser to live or deleted keys
 - **Key comparison** — Diff the latest value of any two keys, across topics or clusters (e.g. staging vs. production)
 - **Point-in-time view** — Browse a topic as it was at any past instant: every key at its latest version as of that moment
 - **Consumer group monitoring** — See which consumer groups are reading a topic, per-partition lag and consumer assignments
@@ -307,7 +308,7 @@ A [chi](https://github.com/go-chi/chi) HTTP router exposing a REST API. Key endp
 | Group | Endpoints | Description |
 |-------|-----------|-------------|
 | **Topics** | `GET /api/topics`, `GET /api/topics/{topic}` | List and detail with consumption progress |
-| **Keys** | `GET /api/topics/{topic}/keys` | Paginated key listing with search, partition filter, offset filter, value search and point-in-time snapshots (`as_of`) |
+| **Keys** | `GET /api/topics/{topic}/keys` | Paginated key listing with search, partition filter, offset filter, value search, live/deleted status and point-in-time snapshots (`as_of`) |
 | **Fields** | `GET /api/topics/{topic}/fields` | Discovered JSON field names for a topic (used by value search autocomplete) |
 | **History** | `GET /api/topics/{topic}/keys/{key}/history` | Message versions for a key (most recent first) |
 | **Timeline** | `GET /api/topics/{topic}/timeline` | Lightweight version metadata for the change timeline visualisation |
@@ -335,7 +336,7 @@ Three tables, defined in [`backend/migrations/`](backend/migrations/):
 
 **`messages`** — every consumed message. Primary key is the composite `(topic_id, partition, offset_id)` with `ON CONFLICT DO NOTHING` for idempotent writes. Stores the deserialised body as JSONB and the record headers as an ordered JSONB array (binary header values are base64-encoded).
 
-**`keys`** — one row per unique key per topic. Tracks the latest partition, offset, timestamp and a cached copy of the latest message body (JSONB). Used for the key browser with indexes for offset-based sorting, time-based sorting, trigram key search and GIN `jsonb_path_ops` value search.
+**`keys`** — one row per unique key per topic. Tracks the latest partition, offset, timestamp, a cached copy of the latest message body (JSONB) and `deleted_at` (the tombstone timestamp when the latest version is a deletion). Used for the key browser with indexes for offset-based sorting, time-based sorting, trigram key search and GIN `jsonb_path_ops` value search.
 
 ## Project Structure
 

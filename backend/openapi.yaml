@@ -170,7 +170,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [offset, last_updated]
+            enum: [offset, last_updated, deleted_at]
             default: last_updated
         - name: sort
           in: query
@@ -196,6 +196,12 @@ paths:
             type: string
           description: JSON document matched against the key's body with JSONB containment (`@>`)
           example: '{"status":"active"}'
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [live, deleted]
+          description: Only keys whose latest version is (`deleted`) or is not (`live`) a tombstone. Omit for all keys.
         - name: as_of
           in: query
           schema:
@@ -203,8 +209,8 @@ paths:
             format: date-time
           description: >-
             Point-in-time snapshot (RFC 3339). Each key is returned as it was at this instant —
-            latest version at or before `as_of`; keys whose latest version by then is a tombstone
-            are omitted. Other filters apply to the historical body.
+            latest version at or before `as_of`. Combine with `status=live` to hide keys deleted by
+            then. Other filters apply to the historical body.
         - name: page
           in: query
           schema:
@@ -223,7 +229,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/PaginatedKeys"
         "400":
-          description: Invalid `as_of` timestamp
+          description: Invalid `as_of` timestamp or `status`
           content:
             application/json:
               schema:
@@ -565,6 +571,9 @@ components:
           type: integer
         unique_keys:
           type: integer
+        deleted_keys:
+          type: integer
+          description: Keys whose latest version is a tombstone
         progress:
           $ref: "#/components/schemas/Progress"
 
@@ -583,6 +592,11 @@ components:
         last_updated:
           type: string
           format: date-time
+        deleted_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Timestamp of the tombstone when the key's latest version is a deletion, otherwise null
 
     Message:
       type: object

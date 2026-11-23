@@ -25,7 +25,10 @@ export interface KeySummary {
   partition: number;
   offset: number;
   last_updated: string;
+  deleted_at: string | null;
 }
+
+export type KeyStatus = "" | "live" | "deleted";
 
 export interface MessageHeader {
   key: string;
@@ -100,6 +103,7 @@ export async function fetchKeys(
   minOffset?: number,
   valueFilter?: string,
   asOf?: string,
+  status?: KeyStatus,
 ): Promise<PaginatedResponse<KeySummary>> {
   const params = new URLSearchParams({ page: String(page), limit: String(limit) });
   if (cluster) params.set("cluster", cluster);
@@ -110,6 +114,7 @@ export async function fetchKeys(
   if (minOffset !== undefined && minOffset > 0) params.set("offset", String(minOffset));
   if (valueFilter) params.set("value_filter", valueFilter);
   if (asOf) params.set("as_of", asOf);
+  if (status) params.set("status", status);
   return request<PaginatedResponse<KeySummary>>(
     `/api/topics/${encodeURIComponent(topic)}/keys?${params}`
   );
@@ -128,6 +133,7 @@ export interface TopicDetail {
   message_format: string;
   consumed_messages: number;
   unique_keys: number;
+  deleted_keys: number;
   progress: Progress;
 }
 

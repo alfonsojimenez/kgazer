@@ -43,12 +43,19 @@ type TopicSummary struct {
 }
 
 type KeySummary struct {
-	Key          string    `json:"key"`
-	MessageCount int       `json:"message_count"`
-	Partition    int32     `json:"partition"`
-	Offset       int64     `json:"offset"`
-	LastUpdated  time.Time `json:"last_updated"`
+	Key          string     `json:"key"`
+	MessageCount int        `json:"message_count"`
+	Partition    int32      `json:"partition"`
+	Offset       int64      `json:"offset"`
+	LastUpdated  time.Time  `json:"last_updated"`
+	DeletedAt    *time.Time `json:"deleted_at"`
 }
+
+const (
+	KeyStatusAll     = ""
+	KeyStatusLive    = "live"
+	KeyStatusDeleted = "deleted"
+)
 
 type Header struct {
 	Key    string  `json:"key"`
@@ -74,6 +81,7 @@ type TopicDetail struct {
 	MessageFormat    string `json:"message_format"`
 	ConsumedMessages int    `json:"consumed_messages"`
 	UniqueKeys       int    `json:"unique_keys"`
+	DeletedKeys      int    `json:"deleted_keys"`
 }
 
 func New(ctx context.Context, dsn string) (*Store, error) {
@@ -397,15 +405,16 @@ func (s *Store) ListTopics(ctx context.Context, cluster, sortDir string) ([]Topi
 
 func (s *Store) GetTopicDetail(ctx context.Context, cluster, topicName string) (*TopicDetail, error) {
 	query := `
-		SELECT name, cluster, partitions, compacted, message_count, key_count, message_format
-		FROM topics
-		WHERE cluster = $1 AND name = $2
+		SELECT t.name, t.cluster, t.partitions, t.compacted, t.message_count, t.key_count, t.message_format,
+		       (SELECT COUNT(*) FROM keys k WHERE k.topic_id = t.id AND k.deleted_at IS NOT NULL)
+		FROM topics t
+		WHERE t.cluster = $1 AND t.name = $2
 		LIMIT 1`
 
 	var d TopicDetail
 	err := s.pool.QueryRow(ctx, query, cluster, topicName).Scan(
 		&d.Name, &d.Cluster, &d.Partitions, &d.Compacted,
-		&d.ConsumedMessages, &d.UniqueKeys, &d.MessageFormat,
+		&d.ConsumedMessages, &d.UniqueKeys, &d.MessageFormat, &d.DeletedKeys,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("getting topic detail: %w", err)
@@ -428,14 +437,15 @@ func (s *Store) DeleteTopicMessages(ctx context.Context, cluster, topic string) 
 
 func (s *Store) UpsertKey(ctx context.Context, topicID int, key string, partition int32, offset int64, timestamp time.Time, body []byte) error {
 	query := `
-		INSERT INTO keys (topic_id, key, message_count, partition, offset_id, last_updated, body)
-		VALUES ($1, $2, 1, $3, $4, $5, $6)
+		INSERT INTO keys (topic_id, key, message_count, partition, offset_id, last_updated, body, deleted_at)
+		VALUES ($1, $2, 1, $3, $4, $5, $6, CASE WHEN $6::jsonb = 'null'::jsonb THEN $5::timestamptz END)
 		ON CONFLICT (topic_id, key) DO UPDATE SET
 			message_count = keys.message_count + 1,
 			partition = EXCLUDED.partition,
 			offset_id = EXCLUDED.offset_id,
 			last_updated = GREATEST(keys.last_updated, EXCLUDED.last_updated),
-			body = EXCLUDED.body`
+			body = EXCLUDED.body,
+			deleted_at = EXCLUDED.deleted_at`
 	_, err := s.writePool.Exec(ctx, query, topicID, key, partition, offset, timestamp, body)
 	return err
 }
@@ -444,22 +454,27 @@ func (s *Store) UpsertKeyBatch(ctx context.Context, entries []KeyEntry) error {
 	if len(entries) == 0 {
 		return nil
 	}
-	query := `INSERT INTO keys (topic_id, key, message_count, partition, offset_id, last_updated, body) VALUES `
-	args := make([]interface{}, 0, len(entries)*7)
+	query := `INSERT INTO keys (topic_id, key, message_count, partition, offset_id, last_updated, body, deleted_at) VALUES `
+	args := make([]interface{}, 0, len(entries)*8)
 	for i, e := range entries {
 		if i > 0 {
 			query += ","
 		}
-		base := i * 7
-		query += fmt.Sprintf("($%d,$%d,$%d,$%d,$%d,$%d,$%d)", base+1, base+2, base+3, base+4, base+5, base+6, base+7)
-		args = append(args, e.TopicID, e.Key, e.Count, e.Partition, e.Offset, e.Timestamp, e.Body)
+		base := i * 8
+		query += fmt.Sprintf("($%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d)", base+1, base+2, base+3, base+4, base+5, base+6, base+7, base+8)
+		var deletedAt *time.Time
+		if string(e.Body) == "null" {
+			deletedAt = &e.Timestamp
+		}
+		args = append(args, e.TopicID, e.Key, e.Count, e.Partition, e.Offset, e.Timestamp, e.Body, deletedAt)
 	}
 	query += ` ON CONFLICT (topic_id, key) DO UPDATE SET
 		message_count = keys.message_count + EXCLUDED.message_count,
 		partition = EXCLUDED.partition,
 		offset_id = EXCLUDED.offset_id,
 		last_updated = GREATEST(keys.last_updated, EXCLUDED.last_updated),
-		body = EXCLUDED.body`
+		body = EXCLUDED.body,
+		deleted_at = EXCLUDED.deleted_at`
 	_, err := s.writePool.Exec(ctx, query, args...)
 	return err
 }
@@ -538,7 +553,7 @@ func sortedKeys(m map[string]interface{}) []string {
 }
 
 // AsOf resolves each key's latest version at or before that instant from the
-// messages table (tombstoned keys omitted) instead of the current-state keys table.
+// messages table instead of the current-state keys table.
 type ListKeysParams struct {
 	Search      string
 	SortBy      string
@@ -546,6 +561,7 @@ type ListKeysParams struct {
 	Partitions  []int
 	MinOffset   int64
 	ValueFilter string
+	Status      string
 	AsOf        *time.Time
 	Page        int
 	Limit       int
@@ -569,7 +585,7 @@ func (s *Store) ListKeys(ctx context.Context, cluster, topic string, p ListKeysP
 		return nil, 0, fmt.Errorf("getting topic: %w", err)
 	}
 
-	hasFilters := search != "" || len(partitions) > 0 || minOffset > 0 || valueFilter != "" || p.AsOf != nil
+	hasFilters := search != "" || len(partitions) > 0 || minOffset > 0 || valueFilter != "" || p.AsOf != nil || p.Status != KeyStatusAll
 
 	conditions := []string{"topic_id = $1"}
 	args := []interface{}{topicID}
@@ -580,12 +596,19 @@ func (s *Store) ListKeys(ctx context.Context, cluster, topic string, p ListKeysP
 		args = append(args, *p.AsOf)
 		source = fmt.Sprintf(`(
 			SELECT DISTINCT ON (key) topic_id, key, partition, offset_id, timestamp AS last_updated, body,
-			       COUNT(*) OVER (PARTITION BY key) AS message_count
+			       COUNT(*) OVER (PARTITION BY key) AS message_count,
+			       CASE WHEN body = 'null'::jsonb THEN timestamp END AS deleted_at
 			FROM messages
 			WHERE topic_id = $1 AND timestamp <= $%d
 			ORDER BY key, timestamp DESC, offset_id DESC
 		) AS snapshot`, len(args))
-		conditions = append(conditions, "body <> 'null'::jsonb")
+	}
+
+	switch p.Status {
+	case KeyStatusLive:
+		conditions = append(conditions, "deleted_at IS NULL")
+	case KeyStatusDeleted:
+		conditions = append(conditions, "deleted_at IS NOT NULL")
 	}
 
 	if search != "" {
@@ -612,8 +635,11 @@ func (s *Store) ListKeys(ctx context.Context, cluster, topic string, p ListKeysP
 	where := "WHERE " + strings.Join(conditions, " AND ")
 
 	sortColumn := "last_updated"
-	if sortBy == "offset" {
+	switch sortBy {
+	case "offset":
 		sortColumn = "offset_id"
+	case "deleted_at":
+		sortColumn = "deleted_at"
 	}
 	dir := sanitizeSortDir(sortDir)
 
@@ -631,7 +657,7 @@ func (s *Store) ListKeys(ctx context.Context, cluster, topic string, p ListKeysP
 	}
 
 	dataQuery := fmt.Sprintf(
-		"SELECT key, message_count, partition, offset_id, last_updated FROM %s %s ORDER BY %s LIMIT $%d OFFSET $%d",
+		"SELECT key, message_count, partition, offset_id, last_updated, deleted_at FROM %s %s ORDER BY %s LIMIT $%d OFFSET $%d",
 		source, where, orderBy, len(args)-1, len(args))
 
 	var (
@@ -676,7 +702,7 @@ func (s *Store) ListKeys(ctx context.Context, cluster, topic string, p ListKeysP
 
 	for rows.Next() {
 		var k KeySummary
-		if err := rows.Scan(&k.Key, &k.MessageCount, &k.Partition, &k.Offset, &k.LastUpdated); err != nil {
+		if err := rows.Scan(&k.Key, &k.MessageCount, &k.Partition, &k.Offset, &k.LastUpdated, &k.DeletedAt); err != nil {
 			return nil, 0, fmt.Errorf("scanning key: %w", err)
 		}
 		keys = append(keys, k)

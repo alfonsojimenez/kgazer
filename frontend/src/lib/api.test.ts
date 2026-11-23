@@ -133,6 +133,15 @@ describe("fetchKeys", () => {
     expect(url).toContain("as_of=2026-01-01T12%3A00%3A00.000Z");
   });
 
+  test("passes the key status filter", async () => {
+    const mockFetch = vi.mocked(fetch);
+    mockFetch.mockResolvedValueOnce(mockResponse({ data: [], total: 0 }));
+
+    await fetchKeys("topic1", "c", undefined, undefined, undefined, 1, 25, undefined, undefined, undefined, undefined, "deleted");
+
+    expect(mockFetch.mock.calls[0][0] as string).toContain("status=deleted");
+  });
+
   test("builds URL with only required params", async () => {
     const mockFetch = vi.mocked(fetch);
     mockFetch.mockResolvedValueOnce(mockResponse({ data: [], total: 0 }));
