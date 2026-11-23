@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ### Added
 
 - Point-in-time view: a date/time picker on the key browser shows every key as it was at that instant (latest version at or before it, keys tombstoned by then hidden), backed by a new `as_of` parameter on `GET /api/topics/{topic}/keys`
+- Key comparison page (`/compare`) that diffs the latest value of two keys across topics or clusters, reachable from the sidebar and from "Compare with…" on the history page; the selection lives in the URL so comparisons can be shared
 
 ## [1.2.0] - 2026-09-29
 

@@ -19,6 +19,7 @@ If you've ever needed to answer "what's the current value for this key?" or "wha
 - **Key value search** — Search message values using `field:value` syntax with field autocomplete
 - **Message history** — View every version of a key with syntax-highlighted JSON and inline diffs
 - **Change timeline** — Interactive visual timeline showing when a key changed and how much
+- **Key comparison** — Diff the latest value of any two keys, across topics or clusters (e.g. staging vs. production)
 - **Point-in-time view** — Browse a topic as it was at any past instant: every key at its latest version as of that moment
 - **Consumer group monitoring** — See which consumer groups are reading a topic, per-partition lag and consumer assignments
 - **Offset management** — Reset consumer group offsets to earliest, latest or specific per-partition values
@@ -358,7 +359,7 @@ kgazer/
 │   ├── src/
 │   │   ├── components/     # Shared UI (JsonViewer, MessageDiff, Sidebar, etc.)
 │   │   ├── lib/            # API client and utilities
-│   │   ├── pages/          # Route pages (Topics, Keys, History, ConsumerGroups, Settings)
+│   │   ├── pages/          # Route pages (Topics, Keys, History, Compare, ConsumerGroups, Settings)
 │   │   └── test/           # Test setup
 │   └── public/             # Static assets (logo)
 ├── charts/kgazer/          # Helm chart for Kubernetes deployment
@@ -378,6 +379,7 @@ KGazer uses path-based cluster routing:
 /clusters/:cluster/topics/:topic/keys             → Key browser
 /clusters/:cluster/topics/:topic/keys/:key        → Message history + diffs
 /clusters/:cluster/topics/:topic/consumer-groups  → Consumer group lag
+/compare?lc=&lt=&lk=&rc=&rt=&rk=                  → Diff two keys (left/right cluster, topic, key)
 /settings                                         → Runtime info, config, orphaned clusters
 ```
 

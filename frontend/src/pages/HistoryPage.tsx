@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { fetchKeyHistory, fetchKeyTimeline } from "@/lib/api";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -12,7 +12,8 @@ import { DiffTimeline } from "@/components/DiffTimeline";
 import { Pagination } from "@/components/Pagination";
 import { JsonViewer } from "@/components/JsonViewer";
 import { MessageDiff } from "@/components/MessageDiff";
-import { Clock, Hash, Layers, Trash2 } from "lucide-react";
+import { Clock, GitCompare, Hash, Layers, Trash2 } from "lucide-react";
+import { compareUrl } from "@/lib/compare";
 
 function timeAgo(date: Date): string {
   const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
@@ -83,11 +84,17 @@ export function HistoryPage() {
             {data.total} version{data.total !== 1 ? "s" : ""}
           </Badge>
         )}
+        <Button variant="outline" size="sm" className="ml-auto text-xs" asChild>
+          <Link to={compareUrl({ cluster: cluster!, topic: decodedTopic, key: decodedKey })}>
+            <GitCompare className="h-3.5 w-3.5" />
+            Compare with…
+          </Link>
+        </Button>
         {data && data.data.length > 1 && (
           <Button
             variant="ghost"
             size="sm"
-            className="ml-auto text-xs text-muted-foreground"
+            className="text-xs text-muted-foreground"
             onClick={() => setAllExpanded(!allExpanded)}
           >
             {allExpanded ? "Collapse all JSON" : "Expand all JSON"}

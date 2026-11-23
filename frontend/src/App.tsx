@@ -7,6 +7,7 @@ import { KeysPage } from "@/pages/KeysPage";
 import { HistoryPage } from "@/pages/HistoryPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { ConsumerGroupsPage } from "@/pages/ConsumerGroupsPage";
+import { ComparePage } from "@/pages/ComparePage";
 import { Sidebar } from "@/components/Sidebar";
 
 const queryClient = new QueryClient({
@@ -56,6 +57,7 @@ export default function App() {
             <Route path="/clusters/:cluster/topics/:topic/keys" element={<KeysPage />} />
             <Route path="/clusters/:cluster/topics/:topic/keys/:key" element={<HistoryPage />} />
             <Route path="/clusters/:cluster/topics/:topic/consumer-groups" element={<ConsumerGroupsPage />} />
+            <Route path="/compare" element={<ComparePage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Routes>
         </Layout>

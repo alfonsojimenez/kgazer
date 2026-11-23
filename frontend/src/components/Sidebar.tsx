@@ -4,7 +4,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { fetchClusters, fetchHealth } from "@/lib/api";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusDot } from "@/components/StatusDot";
-import { Settings } from "lucide-react";
+import { GitCompare, Settings } from "lucide-react";
 
 interface SidebarProps {
   activeCluster: string | null;
@@ -70,6 +70,13 @@ export function Sidebar({ activeCluster }: SidebarProps) {
       </nav>
 
       <div className="border-t border-sidebar-border px-2 py-3 mt-auto">
+        <Link
+          to="/compare"
+          className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-sidebar-foreground hover:bg-sidebar-accent/50 transition-colors"
+        >
+          <GitCompare className="h-4 w-4 text-muted-foreground" />
+          Compare
+        </Link>
         <Link
           to="/settings"
           className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-sidebar-foreground hover:bg-sidebar-accent/50 transition-colors"
