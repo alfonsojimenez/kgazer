@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { fetchKeyHistory, fetchKeyTimeline } from "@/lib/api";
+import { fetchKeyHistory, fetchKeyTimeline, keyHistoryExportUrl } from "@/lib/api";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,7 @@ import { Pagination } from "@/components/Pagination";
 import { JsonViewer } from "@/components/JsonViewer";
 import { MessageDiff } from "@/components/MessageDiff";
 import { MessageHeaders } from "@/components/MessageHeaders";
+import { ExportMenu } from "@/components/ExportMenu";
 import { Clock, GitCompare, Hash, Layers, Trash2 } from "lucide-react";
 import { compareUrl } from "@/lib/compare";
 
@@ -91,6 +92,10 @@ export function HistoryPage() {
             Compare with…
           </Link>
         </Button>
+        <ExportMenu
+          description="Every stored version of this key, newest first, including headers."
+          urlFor={(format) => keyHistoryExportUrl(decodedTopic, decodedKey, format, cluster)}
+        />
         {data && data.data.length > 1 && (
           <Button
             variant="ghost"

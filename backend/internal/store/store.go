@@ -567,41 +567,43 @@ type ListKeysParams struct {
 	Limit       int
 }
 
-func (s *Store) ListKeys(ctx context.Context, cluster, topic string, p ListKeysParams) ([]KeySummary, int, error) {
-	search, sortBy, sortDir := p.Search, p.SortBy, p.SortDir
-	partitions, minOffset, valueFilter := p.Partitions, p.MinOffset, p.ValueFilter
-	page, limit := p.Page, p.Limit
-	pgOffset := (page - 1) * limit
+type keysQuery struct {
+	topicID    int
+	keyCount   int
+	source     string
+	where      string
+	orderBy    string
+	args       []interface{}
+	hasFilters bool
+}
 
-	var topicID int
-	var keyCount int
+func (s *Store) buildKeysQuery(ctx context.Context, cluster, topic string, p ListKeysParams) (*keysQuery, error) {
+	q := &keysQuery{source: "keys"}
 	err := s.pool.QueryRow(ctx,
 		`SELECT id, key_count FROM topics WHERE cluster = $1 AND name = $2`,
-		cluster, topic).Scan(&topicID, &keyCount)
+		cluster, topic).Scan(&q.topicID, &q.keyCount)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, 0, ErrTopicNotFound
+		return nil, ErrTopicNotFound
 	}
 	if err != nil {
-		return nil, 0, fmt.Errorf("getting topic: %w", err)
+		return nil, fmt.Errorf("getting topic: %w", err)
 	}
 
-	hasFilters := search != "" || len(partitions) > 0 || minOffset > 0 || valueFilter != "" || p.AsOf != nil || p.Status != KeyStatusAll
+	q.hasFilters = p.Search != "" || len(p.Partitions) > 0 || p.MinOffset > 0 || p.ValueFilter != "" || p.AsOf != nil || p.Status != KeyStatusAll
 
 	conditions := []string{"topic_id = $1"}
-	args := []interface{}{topicID}
-	searchIdx := 0
+	q.args = []interface{}{q.topicID}
 
-	source := "keys"
 	if p.AsOf != nil {
-		args = append(args, *p.AsOf)
-		source = fmt.Sprintf(`(
+		q.args = append(q.args, *p.AsOf)
+		q.source = fmt.Sprintf(`(
 			SELECT DISTINCT ON (key) topic_id, key, partition, offset_id, timestamp AS last_updated, body,
 			       COUNT(*) OVER (PARTITION BY key) AS message_count,
 			       CASE WHEN body = 'null'::jsonb THEN timestamp END AS deleted_at
 			FROM messages
 			WHERE topic_id = $1 AND timestamp <= $%d
 			ORDER BY key, timestamp DESC, offset_id DESC
-		) AS snapshot`, len(args))
+		) AS snapshot`, len(q.args))
 	}
 
 	switch p.Status {
@@ -611,69 +613,90 @@ func (s *Store) ListKeys(ctx context.Context, cluster, topic string, p ListKeysP
 		conditions = append(conditions, "deleted_at IS NOT NULL")
 	}
 
-	if search != "" {
-		args = append(args, search)
-		searchIdx = len(args)
+	searchIdx := 0
+	if p.Search != "" {
+		q.args = append(q.args, p.Search)
+		searchIdx = len(q.args)
 		conditions = append(conditions, fmt.Sprintf("key ILIKE '%%' || $%d || '%%'", searchIdx))
 	}
 
-	if len(partitions) > 0 {
-		args = append(args, partitions)
-		conditions = append(conditions, fmt.Sprintf("partition = ANY($%d)", len(args)))
+	if len(p.Partitions) > 0 {
+		q.args = append(q.args, p.Partitions)
+		conditions = append(conditions, fmt.Sprintf("partition = ANY($%d)", len(q.args)))
 	}
 
-	if minOffset > 0 {
-		args = append(args, minOffset)
-		conditions = append(conditions, fmt.Sprintf("offset_id >= $%d", len(args)))
+	if p.MinOffset > 0 {
+		q.args = append(q.args, p.MinOffset)
+		conditions = append(conditions, fmt.Sprintf("offset_id >= $%d", len(q.args)))
 	}
 
-	if valueFilter != "" {
-		args = append(args, valueFilter)
-		conditions = append(conditions, fmt.Sprintf("body @> $%d::jsonb", len(args)))
+	if p.ValueFilter != "" {
+		q.args = append(q.args, p.ValueFilter)
+		conditions = append(conditions, fmt.Sprintf("body @> $%d::jsonb", len(q.args)))
 	}
 
-	where := "WHERE " + strings.Join(conditions, " AND ")
+	q.where = "WHERE " + strings.Join(conditions, " AND ")
 
 	sortColumn := "last_updated"
-	switch sortBy {
+	switch p.SortBy {
 	case "offset":
 		sortColumn = "offset_id"
 	case "deleted_at":
 		sortColumn = "deleted_at"
 	}
-	dir := sanitizeSortDir(sortDir)
+	q.orderBy = sortColumn + " " + sanitizeSortDir(p.SortDir)
+	if searchIdx > 0 {
+		q.orderBy = fmt.Sprintf("(key = $%d) DESC, (key ILIKE $%d || '%%%%') DESC, %s", searchIdx, searchIdx, q.orderBy)
+	}
+	return q, nil
+}
 
-	orderBy := sortColumn + " " + dir
-	if search != "" && searchIdx > 0 {
-		orderBy = fmt.Sprintf("(key = $%d) DESC, (key ILIKE $%d || '%%%%') DESC, %s", searchIdx, searchIdx, orderBy)
+func (s *Store) readOnlyTx(ctx context.Context, valueFilter string) (pgx.Tx, error) {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return nil, fmt.Errorf("beginning tx: %w", err)
+	}
+	if valueFilter != "" {
+		if _, err := tx.Exec(ctx, "SET LOCAL enable_bitmapscan = off"); err != nil {
+			tx.Rollback(ctx)
+			return nil, fmt.Errorf("setting enable_bitmapscan: %w", err)
+		}
+	}
+	return tx, nil
+}
+
+func (s *Store) ListKeys(ctx context.Context, cluster, topic string, p ListKeysParams) ([]KeySummary, int, error) {
+	q, err := s.buildKeysQuery(ctx, cluster, topic, p)
+	if err != nil {
+		return nil, 0, err
 	}
 
-	args = append(args, limit, pgOffset)
-	countArgs := args[:len(args)-2]
+	countArgs := q.args
+	args := append(append([]interface{}{}, q.args...), p.Limit, (p.Page-1)*p.Limit)
 
 	var total int
-	if !hasFilters {
-		total = keyCount
+	if !q.hasFilters {
+		total = q.keyCount
 	}
 
 	dataQuery := fmt.Sprintf(
 		"SELECT key, message_count, partition, offset_id, last_updated, deleted_at FROM %s %s ORDER BY %s LIMIT $%d OFFSET $%d",
-		source, where, orderBy, len(args)-1, len(args))
+		q.source, q.where, q.orderBy, len(args)-1, len(args))
 
 	var (
-		keys    []KeySummary
-		dataErr error
+		keys     []KeySummary
+		dataErr  error
 		countErr error
-		wg      sync.WaitGroup
+		wg       sync.WaitGroup
 	)
 
-	if hasFilters {
+	if q.hasFilters {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			countCtx, cancel := context.WithTimeout(ctx, 1*time.Second)
 			defer cancel()
-			countQuery := fmt.Sprintf("SELECT COUNT(*) FROM %s %s", source, where)
+			countQuery := fmt.Sprintf("SELECT COUNT(*) FROM %s %s", q.source, q.where)
 			countErr = s.pool.QueryRow(countCtx, countQuery, countArgs...).Scan(&total)
 			if countErr != nil {
 				total = -1
@@ -682,17 +705,11 @@ func (s *Store) ListKeys(ctx context.Context, cluster, topic string, p ListKeysP
 		}()
 	}
 
-	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
+	tx, err := s.readOnlyTx(ctx, p.ValueFilter)
 	if err != nil {
-		return nil, 0, fmt.Errorf("beginning tx: %w", err)
+		return nil, 0, err
 	}
 	defer tx.Rollback(ctx)
-
-	if valueFilter != "" {
-		if _, err := tx.Exec(ctx, "SET LOCAL enable_bitmapscan = off"); err != nil {
-			return nil, 0, fmt.Errorf("setting enable_bitmapscan: %w", err)
-		}
-	}
 
 	rows, err := tx.Query(ctx, dataQuery, args...)
 	if err != nil {
@@ -715,6 +732,68 @@ func (s *Store) ListKeys(ctx context.Context, cluster, topic string, p ListKeysP
 	}
 
 	return keys, total, dataErr
+}
+
+type ExportedKey struct {
+	KeySummary
+	Body json.RawMessage `json:"body"`
+}
+
+// ExportKeys ignores pagination and streams rows to fn without buffering them.
+func (s *Store) ExportKeys(ctx context.Context, cluster, topic string, p ListKeysParams, fn func(ExportedKey) error) error {
+	q, err := s.buildKeysQuery(ctx, cluster, topic, p)
+	if err != nil {
+		return err
+	}
+
+	tx, err := s.readOnlyTx(ctx, p.ValueFilter)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	rows, err := tx.Query(ctx, fmt.Sprintf(
+		"SELECT key, message_count, partition, offset_id, last_updated, deleted_at, COALESCE(body, 'null'::jsonb) FROM %s %s ORDER BY %s",
+		q.source, q.where, q.orderBy), q.args...)
+	if err != nil {
+		return fmt.Errorf("exporting keys: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var k ExportedKey
+		if err := rows.Scan(&k.Key, &k.MessageCount, &k.Partition, &k.Offset, &k.LastUpdated, &k.DeletedAt, &k.Body); err != nil {
+			return fmt.Errorf("scanning key: %w", err)
+		}
+		if err := fn(k); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
+}
+
+func (s *Store) ExportKeyHistory(ctx context.Context, cluster, topic, key string, fn func(Message) error) error {
+	rows, err := s.pool.Query(ctx, `
+		SELECT key, body, COALESCE(headers, '[]'::jsonb), partition, offset_id, timestamp
+		FROM messages
+		WHERE topic_id = (SELECT id FROM topics WHERE cluster = $1 AND name = $2) AND key = $3
+		ORDER BY timestamp DESC, offset_id DESC`, cluster, topic, key)
+	if err != nil {
+		return fmt.Errorf("exporting key history: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var m Message
+		if err := rows.Scan(&m.Key, &m.Body, &m.Headers, &m.Partition, &m.Offset, &m.Timestamp); err != nil {
+			return fmt.Errorf("scanning message: %w", err)
+		}
+		m.ID = m.Offset
+		if err := fn(m); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
 }
 
 func (s *Store) GetKeyHistory(ctx context.Context, cluster, topic, key string, page, limit int) ([]Message, int, error) {

@@ -5,6 +5,8 @@ import {
   fetchTopicDetail,
   fetchKeys,
   fetchKeyHistory,
+  keysExportUrl,
+  keyHistoryExportUrl,
   fetchTopicConsumerGroups,
   fetchConsumerGroupLag,
   resetConsumerGroupOffsets,
@@ -154,6 +156,27 @@ describe("fetchKeys", () => {
     expect(url).toContain("limit=25");
     expect(url).not.toContain("cluster=");
     expect(url).not.toContain("search=");
+  });
+});
+
+describe("export URLs", () => {
+  test("keysExportUrl carries the active filters and format", () => {
+    const url = keysExportUrl("my topic", "csv", { cluster: "prod", search: "abc", status: "deleted", partitions: [1, 2], asOf: "2026-01-01T00:00:00.000Z" });
+    expect(url).toMatch(/^\/api\/topics\/my%20topic\/keys\/export\?/);
+    const params = new URL(url, "http://x").searchParams;
+    expect(Object.fromEntries(params)).toEqual({
+      cluster: "prod",
+      search: "abc",
+      partition: "1,2",
+      as_of: "2026-01-01T00:00:00.000Z",
+      status: "deleted",
+      format: "csv",
+    });
+  });
+
+  test("keyHistoryExportUrl", () => {
+    const params = new URL(keyHistoryExportUrl("t", "a/b", "json", "prod"), "http://x").searchParams;
+    expect(Object.fromEntries(params)).toEqual({ key: "a/b", format: "json", cluster: "prod" });
   });
 });
 

@@ -6,12 +6,14 @@ import {
   fetchKeys,
   fetchTopicDetail,
   reconsumeTopics,
+  keysExportUrl,
   type KeyStatus,
 
   fetchTopicConsumerGroups,
 } from "@/lib/api";
 import { parseSearch, buildSearch, filtersToJSON } from "@/lib/search-parser";
 import { FieldFilterPopover } from "@/components/FieldFilterPopover";
+import { ExportMenu } from "@/components/ExportMenu";
 import { cn } from "@/lib/utils";
 import {
   TableBody,
@@ -529,6 +531,22 @@ export function KeysPage() {
             className="w-56 h-8 text-xs pl-8"
           />
         </div>
+        <ExportMenu
+          description={activeFilterCount > 0 ? "All keys matching the current filters, with their latest value." : "All keys with their latest value."}
+          urlFor={(format) =>
+            keysExportUrl(topic!, format, {
+              cluster,
+              search: parsed.text || undefined,
+              sortBy,
+              sort: sortDir,
+              partitions: selectedPartitions,
+              minOffset: debouncedOffset,
+              valueFilter,
+              asOf,
+              status: effectiveStatus,
+            })
+          }
+        />
         {activeFilterCount > 0 && (
           <Button
             variant="ghost"

@@ -237,6 +237,81 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /api/topics/{topic}/keys/export:
+    get:
+      summary: Export keys as JSON or CSV
+      description: >-
+        Streams every key matching the filters (no pagination) with its latest body, as a file download.
+        Accepts the same filter and sort parameters as `GET /api/topics/{topic}/keys`. CSV columns are
+        key, message_count, partition, offset, last_updated, deleted_at, body (body as JSON text).
+      operationId: exportKeys
+      tags: [Keys]
+      parameters:
+        - $ref: "#/components/parameters/topicPath"
+        - $ref: "#/components/parameters/clusterQuery"
+        - $ref: "#/components/parameters/exportFormat"
+      responses:
+        "200":
+          description: "File download (`Content-Disposition: attachment`)"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  allOf:
+                    - $ref: "#/components/schemas/KeySummary"
+                    - type: object
+                      properties:
+                        body:
+                          description: Latest JSON body (null for tombstones)
+            text/csv:
+              schema:
+                type: string
+        "400":
+          description: Invalid `format`, `status` or `as_of`
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/topics/{topic}/history/export:
+    get:
+      summary: Export a key's full history as JSON or CSV
+      description: >-
+        Streams every stored version of the key, newest first, including headers. CSV columns are
+        key, partition, offset, timestamp, headers, body (headers and body as JSON text).
+      operationId: exportKeyHistory
+      tags: [Keys]
+      parameters:
+        - $ref: "#/components/parameters/topicPath"
+        - name: key
+          in: query
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/clusterQuery"
+        - $ref: "#/components/parameters/exportFormat"
+      responses:
+        "200":
+          description: "File download (`Content-Disposition: attachment`)"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Message"
+            text/csv:
+              schema:
+                type: string
+        "400":
+          description: Missing key or invalid `format`
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /api/topics/{topic}/keys/{key}/history:
     get:
       summary: Get message history for a key
@@ -488,6 +563,13 @@ components:
       schema:
         type: string
       description: Cluster name to filter by
+    exportFormat:
+      name: format
+      in: query
+      schema:
+        type: string
+        enum: [json, csv]
+        default: json
     topicPath:
       name: topic
       in: path

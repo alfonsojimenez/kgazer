@@ -20,6 +20,7 @@ If you've ever needed to answer "what's the current value for this key?" or "wha
 - **Message history** — View every version of a key with syntax-highlighted JSON, record headers and inline diffs
 - **Change timeline** — Interactive visual timeline showing when a key changed and how much
 - **Deletion tracking** — See which keys were tombstoned and when, filter the key browser to live or deleted keys
+- **Export** — Download the filtered key list or a key's full history as JSON or CSV
 - **Key comparison** — Diff the latest value of any two keys, across topics or clusters (e.g. staging vs. production)
 - **Point-in-time view** — Browse a topic as it was at any past instant: every key at its latest version as of that moment
 - **Consumer group monitoring** — See which consumer groups are reading a topic, per-partition lag and consumer assignments
@@ -311,6 +312,7 @@ A [chi](https://github.com/go-chi/chi) HTTP router exposing a REST API. Key endp
 | **Keys** | `GET /api/topics/{topic}/keys` | Paginated key listing with search, partition filter, offset filter, value search, live/deleted status and point-in-time snapshots (`as_of`) |
 | **Fields** | `GET /api/topics/{topic}/fields` | Discovered JSON field names for a topic (used by value search autocomplete) |
 | **History** | `GET /api/topics/{topic}/keys/{key}/history` | Message versions for a key (most recent first) |
+| **Export** | `GET /api/topics/{topic}/keys/export`, `GET /api/topics/{topic}/history/export` | Stream filtered keys or a key's full history as a JSON or CSV download (`format=json\|csv`) |
 | **Timeline** | `GET /api/topics/{topic}/timeline` | Lightweight version metadata for the change timeline visualisation |
 | **Consumer Groups** | `GET /api/topics/{topic}/consumer-groups`, `GET /{group}` | Live consumer groups with per-partition lag |
 | **Offset Reset** | `POST /api/topics/{topic}/consumer-groups/{group}/reset-offsets` | Reset offsets to earliest, latest, or specific values |

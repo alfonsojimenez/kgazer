@@ -91,6 +91,32 @@ export async function fetchTopics(cluster?: string, sort?: string): Promise<Topi
   return request<TopicSummary[]>(`/api/topics${qs ? `?${qs}` : ""}`);
 }
 
+export interface KeyFilters {
+  cluster?: string;
+  search?: string;
+  sortBy?: string;
+  sort?: string;
+  partitions?: number[];
+  minOffset?: number;
+  valueFilter?: string;
+  asOf?: string;
+  status?: KeyStatus;
+}
+
+function keyFilterParams(f: KeyFilters): URLSearchParams {
+  const params = new URLSearchParams();
+  if (f.cluster) params.set("cluster", f.cluster);
+  if (f.search) params.set("search", f.search);
+  if (f.sortBy) params.set("sort_by", f.sortBy);
+  if (f.sort) params.set("sort", f.sort);
+  if (f.partitions && f.partitions.length > 0) params.set("partition", f.partitions.join(","));
+  if (f.minOffset !== undefined && f.minOffset > 0) params.set("offset", String(f.minOffset));
+  if (f.valueFilter) params.set("value_filter", f.valueFilter);
+  if (f.asOf) params.set("as_of", f.asOf);
+  if (f.status) params.set("status", f.status);
+  return params;
+}
+
 export async function fetchKeys(
   topic: string,
   cluster?: string,
@@ -105,19 +131,26 @@ export async function fetchKeys(
   asOf?: string,
   status?: KeyStatus,
 ): Promise<PaginatedResponse<KeySummary>> {
-  const params = new URLSearchParams({ page: String(page), limit: String(limit) });
-  if (cluster) params.set("cluster", cluster);
-  if (search) params.set("search", search);
-  if (sortBy) params.set("sort_by", sortBy);
-  if (sort) params.set("sort", sort);
-  if (partitions && partitions.length > 0) params.set("partition", partitions.join(","));
-  if (minOffset !== undefined && minOffset > 0) params.set("offset", String(minOffset));
-  if (valueFilter) params.set("value_filter", valueFilter);
-  if (asOf) params.set("as_of", asOf);
-  if (status) params.set("status", status);
+  const params = keyFilterParams({ cluster, search, sortBy, sort, partitions, minOffset, valueFilter, asOf, status });
+  params.set("page", String(page));
+  params.set("limit", String(limit));
   return request<PaginatedResponse<KeySummary>>(
     `/api/topics/${encodeURIComponent(topic)}/keys?${params}`
   );
+}
+
+export type ExportFormat = "json" | "csv";
+
+export function keysExportUrl(topic: string, format: ExportFormat, filters: KeyFilters): string {
+  const params = keyFilterParams(filters);
+  params.set("format", format);
+  return `${API_BASE}/api/topics/${encodeURIComponent(topic)}/keys/export?${params}`;
+}
+
+export function keyHistoryExportUrl(topic: string, key: string, format: ExportFormat, cluster?: string): string {
+  const params = new URLSearchParams({ key, format });
+  if (cluster) params.set("cluster", cluster);
+  return `${API_BASE}/api/topics/${encodeURIComponent(topic)}/history/export?${params}`;
 }
 
 export async function fetchFields(topic: string, cluster?: string): Promise<string[]> {

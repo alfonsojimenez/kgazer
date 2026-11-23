@@ -49,6 +49,8 @@ func NewRouter(s *store.Store, t *status.Tracker, pt *progress.Tracker, admins *
 	r.Get("/api/topics/{topic}/history", handleGetKeyHistoryByQuery(s))
 	r.Get("/api/topics/{topic}/fields", handleGetTopicFields(s))
 	r.Get("/api/topics/{topic}/timeline", handleGetKeyTimeline(s))
+	r.Get("/api/topics/{topic}/keys/export", handleExportKeys(s))
+	r.Get("/api/topics/{topic}/history/export", handleExportKeyHistory(s))
 
 	r.Get("/api/settings/info", handleSettingsInfo(s, t, version, startedAt, cfg))
 	r.Get("/api/settings/orphaned-clusters", handleOrphanedClusters(s, t))
@@ -162,56 +164,56 @@ func handleListTopics(s *store.Store, pt *progress.Tracker) http.HandlerFunc {
 	}
 }
 
+func parseKeysParams(r *http.Request) (store.ListKeysParams, error) {
+	q := r.URL.Query()
+	params := store.ListKeysParams{
+		Search:      q.Get("search"),
+		SortBy:      q.Get("sort_by"),
+		SortDir:     q.Get("sort"),
+		ValueFilter: q.Get("value_filter"),
+		Status:      q.Get("status"),
+		Page:        queryInt(r, "page", 1),
+		Limit:       queryInt(r, "limit", 50),
+	}
+
+	if p := q.Get("partition"); p != "" {
+		for _, s := range strings.Split(p, ",") {
+			if v, err := strconv.Atoi(strings.TrimSpace(s)); err == nil {
+				params.Partitions = append(params.Partitions, v)
+			}
+		}
+	}
+
+	if o := q.Get("offset"); o != "" {
+		if v, err := strconv.ParseInt(o, 10, 64); err == nil {
+			params.MinOffset = v
+		}
+	}
+
+	switch params.Status {
+	case store.KeyStatusAll, store.KeyStatusLive, store.KeyStatusDeleted:
+	default:
+		return params, errors.New("status must be 'live' or 'deleted'")
+	}
+
+	if v := q.Get("as_of"); v != "" {
+		asOf, err := time.Parse(time.RFC3339, v)
+		if err != nil {
+			return params, errors.New("as_of must be an RFC 3339 timestamp")
+		}
+		params.AsOf = &asOf
+	}
+	return params, nil
+}
+
 func handleListKeys(s *store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		topic := chi.URLParam(r, "topic")
 		cluster := r.URL.Query().Get("cluster")
-		search := r.URL.Query().Get("search")
-		sortBy := r.URL.Query().Get("sort_by")
-		sortDir := r.URL.Query().Get("sort")
-		page := queryInt(r, "page", 1)
-		limit := queryInt(r, "limit", 50)
-
-		var partitions []int
-		if p := r.URL.Query().Get("partition"); p != "" {
-			for _, s := range strings.Split(p, ",") {
-				if v, err := strconv.Atoi(strings.TrimSpace(s)); err == nil {
-					partitions = append(partitions, v)
-				}
-			}
-		}
-
-		var minOffset int64
-		if o := r.URL.Query().Get("offset"); o != "" {
-			if v, err := strconv.ParseInt(o, 10, 64); err == nil {
-				minOffset = v
-			}
-		}
-
-		params := store.ListKeysParams{
-			Search:      search,
-			SortBy:      sortBy,
-			SortDir:     sortDir,
-			Partitions:  partitions,
-			MinOffset:   minOffset,
-			ValueFilter: r.URL.Query().Get("value_filter"),
-			Status:      r.URL.Query().Get("status"),
-			Page:        page,
-			Limit:       limit,
-		}
-		switch params.Status {
-		case store.KeyStatusAll, store.KeyStatusLive, store.KeyStatusDeleted:
-		default:
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "status must be 'live' or 'deleted'"})
+		params, err := parseKeysParams(r)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
-		}
-		if v := r.URL.Query().Get("as_of"); v != "" {
-			asOf, err := time.Parse(time.RFC3339, v)
-			if err != nil {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "as_of must be an RFC 3339 timestamp"})
-				return
-			}
-			params.AsOf = &asOf
 		}
 
 		keys, total, err := s.ListKeys(r.Context(), cluster, topic, params)
@@ -232,8 +234,8 @@ func handleListKeys(s *store.Store) http.HandlerFunc {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"data":  keys,
 			"total": total,
-			"page":  page,
-			"limit": limit,
+			"page":  params.Page,
+			"limit": params.Limit,
 		})
 	}
 }

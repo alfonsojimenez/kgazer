@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - Key comparison page (`/compare`) that diffs the latest value of two keys across topics or clusters, reachable from the sidebar and from "Compare with…" on the history page; the selection lives in the URL so comparisons can be shared
 - Kafka record headers are now stored (new nullable `messages.headers` JSONB column, migration 007) and shown in a collapsible section on each version in the message history; history responses include a `headers` array. Messages consumed before this change show no headers until the topic is re-consumed
 - Deletion tracking: keys now record `deleted_at` when their latest version is a tombstone (migration 008, backfilled from existing data, cleared when the key is re-created). The key browser gains an All / Live / Deleted filter, a "Deleted N ago" badge on tombstoned keys and a Deleted Keys count on the topic card; the API adds `status` and `sort_by=deleted_at` to the keys endpoint and `deleted_keys` to topic detail
+- Export: download the key browser's current result set (all pages, honouring every filter including `as_of` and status) or a key's full history (with headers) as JSON or CSV, via an Export menu on both pages. New streaming endpoints `GET /api/topics/{topic}/keys/export` and `GET /api/topics/{topic}/history/export` write rows straight from PostgreSQL without buffering and are exempt from the 30s write timeout
 
 ## [1.2.0] - 2026-09-29
 
