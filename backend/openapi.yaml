@@ -190,6 +190,21 @@ paths:
             type: integer
             format: int64
           description: Filter by exact offset
+        - name: value_filter
+          in: query
+          schema:
+            type: string
+          description: JSON document matched against the key's body with JSONB containment (`@>`)
+          example: '{"status":"active"}'
+        - name: as_of
+          in: query
+          schema:
+            type: string
+            format: date-time
+          description: >-
+            Point-in-time snapshot (RFC 3339). Each key is returned as it was at this instant —
+            latest version at or before `as_of`; keys whose latest version by then is a tombstone
+            are omitted. Other filters apply to the historical body.
         - name: page
           in: query
           schema:
@@ -207,6 +222,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PaginatedKeys"
+        "400":
+          description: Invalid `as_of` timestamp
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "404":
           $ref: "#/components/responses/NotFound"
 

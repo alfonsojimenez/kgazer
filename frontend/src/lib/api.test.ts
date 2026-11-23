@@ -123,6 +123,16 @@ describe("fetchKeys", () => {
     expect(url).toContain("offset=100");
   });
 
+  test("passes as_of for point-in-time snapshots", async () => {
+    const mockFetch = vi.mocked(fetch);
+    mockFetch.mockResolvedValueOnce(mockResponse({ data: [], total: 0 }));
+
+    await fetchKeys("topic1", "c", undefined, undefined, undefined, 1, 25, undefined, undefined, undefined, "2026-01-01T12:00:00.000Z");
+
+    const url = mockFetch.mock.calls[0][0] as string;
+    expect(url).toContain("as_of=2026-01-01T12%3A00%3A00.000Z");
+  });
+
   test("builds URL with only required params", async () => {
     const mockFetch = vi.mocked(fetch);
     mockFetch.mockResolvedValueOnce(mockResponse({ data: [], total: 0 }));

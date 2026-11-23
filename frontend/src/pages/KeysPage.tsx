@@ -40,7 +40,7 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Pagination } from "@/components/Pagination";
 import { Progress } from "@/components/ui/progress";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
-import { Search, RotateCcw, Loader2, ArrowDown, ArrowUp, Check, Users, Filter, X } from "lucide-react";
+import { Search, RotateCcw, Loader2, ArrowDown, ArrowUp, Check, Users, Filter, X, History } from "lucide-react";
 
 const FORMAT_BADGE_CLASSES: Record<string, string> = {
   json: "bg-emerald-500/10 text-emerald-500 border-emerald-500/20",
@@ -113,6 +113,7 @@ export function KeysPage() {
   const [selectedPartitions, setSelectedPartitions] = useState<number[]>([]);
   const [offsetFilter, setOffsetFilter] = useState("");
   const [debouncedOffset, setDebouncedOffset] = useState(0);
+  const [asOfInput, setAsOfInput] = useState("");
   const [partitionPopoverOpen, setPartitionPopoverOpen] = useState(false);
   const [reconsumeOpen, setReconsumeOpen] = useState(false);
 
@@ -145,7 +146,7 @@ export function KeysPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [selectedPartitions]);
+  }, [selectedPartitions, asOfInput]);
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -165,7 +166,11 @@ export function KeysPage() {
   const activeFilterCount =
     (search ? 1 : 0) +
     (selectedPartitions.length > 0 ? 1 : 0) +
-    (offsetFilter ? 1 : 0);
+    (offsetFilter ? 1 : 0) +
+    (asOfInput ? 1 : 0);
+
+  const asOfDate = asOfInput ? new Date(asOfInput) : null;
+  const asOf = asOfDate && !isNaN(asOfDate.getTime()) ? asOfDate.toISOString() : undefined;
 
   const parsed = parseSearch(debouncedSearch);
   const hasValueFilters = Object.keys(parsed.filters).length > 0;
@@ -187,10 +192,10 @@ export function KeysPage() {
   });
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ["keys", topic, cluster, debouncedSearch, sortBy, sortDir, page, selectedPartitions, debouncedOffset],
-    queryFn: () => fetchKeys(topic!, cluster, parsed.text || undefined, sortBy, sortDir, page, limit, selectedPartitions.length > 0 ? selectedPartitions : undefined, debouncedOffset || undefined, valueFilter),
+    queryKey: ["keys", topic, cluster, debouncedSearch, sortBy, sortDir, page, selectedPartitions, debouncedOffset, asOf],
+    queryFn: () => fetchKeys(topic!, cluster, parsed.text || undefined, sortBy, sortDir, page, limit, selectedPartitions.length > 0 ? selectedPartitions : undefined, debouncedOffset || undefined, valueFilter, asOf),
     enabled: !!topic,
-    refetchInterval: 5_000,
+    refetchInterval: asOf ? false : 5_000,
     refetchIntervalInBackground: true,
   });
 
@@ -481,6 +486,17 @@ export function KeysPage() {
           onChange={(e) => setOffsetFilter(e.target.value)}
           className="w-32 h-8 text-xs"
         />
+        <div className="relative" title="Show keys as they were at this point in time">
+          <History className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+          <Input
+            type="datetime-local"
+            step={1}
+            aria-label="Point in time"
+            value={asOfInput}
+            onChange={(e) => setAsOfInput(e.target.value)}
+            className="w-56 h-8 text-xs pl-8"
+          />
+        </div>
         {activeFilterCount > 0 && (
           <Button
             variant="ghost"
@@ -489,6 +505,7 @@ export function KeysPage() {
               setSearch("");
               setSelectedPartitions([]);
               setOffsetFilter("");
+              setAsOfInput("");
             }}
           >
             <X className="h-3.5 w-3.5" />
@@ -515,6 +532,19 @@ export function KeysPage() {
               </button>
             </Badge>
           ))}
+        </div>
+      )}
+
+      {asOfDate && asOf && (
+        <div className="flex items-center gap-2 rounded-lg border border-blue-500/20 bg-blue-500/10 px-4 py-2 text-sm text-blue-500">
+          <History className="h-4 w-4 shrink-0" />
+          <span>
+            Snapshot as of <span className="font-medium">{asOfDate.toLocaleString()}</span> — each key shows its
+            latest version at that moment; keys deleted by then are hidden.
+          </span>
+          <Button variant="ghost" size="sm" className="ml-auto h-7 text-blue-500" onClick={() => setAsOfInput("")}>
+            Back to live
+          </Button>
         </div>
       )}
 
@@ -585,8 +615,10 @@ export function KeysPage() {
                 {data?.data.length === 0 && !isLoading && (
                   <TableRow>
                     <TableCell colSpan={5} className="h-32 text-center">
-                      {debouncedSearch ? (
-                        <span className="text-muted-foreground">No keys match your search</span>
+                      {debouncedSearch || asOf ? (
+                        <span className="text-muted-foreground">
+                          {asOf && !debouncedSearch ? "No keys existed at this point in time" : "No keys match your search"}
+                        </span>
                       ) : (
                         <div className="flex flex-col items-center gap-3">
                           <div className="flex items-center gap-1.5">

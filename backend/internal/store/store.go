@@ -529,7 +529,24 @@ func sortedKeys(m map[string]interface{}) []string {
 	return keys
 }
 
-func (s *Store) ListKeys(ctx context.Context, cluster, topic, search, sortBy, sortDir string, partitions []int, minOffset int64, valueFilter string, page, limit int) ([]KeySummary, int, error) {
+// AsOf resolves each key's latest version at or before that instant from the
+// messages table (tombstoned keys omitted) instead of the current-state keys table.
+type ListKeysParams struct {
+	Search      string
+	SortBy      string
+	SortDir     string
+	Partitions  []int
+	MinOffset   int64
+	ValueFilter string
+	AsOf        *time.Time
+	Page        int
+	Limit       int
+}
+
+func (s *Store) ListKeys(ctx context.Context, cluster, topic string, p ListKeysParams) ([]KeySummary, int, error) {
+	search, sortBy, sortDir := p.Search, p.SortBy, p.SortDir
+	partitions, minOffset, valueFilter := p.Partitions, p.MinOffset, p.ValueFilter
+	page, limit := p.Page, p.Limit
 	pgOffset := (page - 1) * limit
 
 	var topicID int
@@ -544,11 +561,24 @@ func (s *Store) ListKeys(ctx context.Context, cluster, topic, search, sortBy, so
 		return nil, 0, fmt.Errorf("getting topic: %w", err)
 	}
 
-	hasFilters := search != "" || len(partitions) > 0 || minOffset > 0 || valueFilter != ""
+	hasFilters := search != "" || len(partitions) > 0 || minOffset > 0 || valueFilter != "" || p.AsOf != nil
 
 	conditions := []string{"topic_id = $1"}
 	args := []interface{}{topicID}
 	searchIdx := 0
+
+	source := "keys"
+	if p.AsOf != nil {
+		args = append(args, *p.AsOf)
+		source = fmt.Sprintf(`(
+			SELECT DISTINCT ON (key) topic_id, key, partition, offset_id, timestamp AS last_updated, body,
+			       COUNT(*) OVER (PARTITION BY key) AS message_count
+			FROM messages
+			WHERE topic_id = $1 AND timestamp <= $%d
+			ORDER BY key, timestamp DESC, offset_id DESC
+		) AS snapshot`, len(args))
+		conditions = append(conditions, "body <> 'null'::jsonb")
+	}
 
 	if search != "" {
 		args = append(args, search)
@@ -593,8 +623,8 @@ func (s *Store) ListKeys(ctx context.Context, cluster, topic, search, sortBy, so
 	}
 
 	dataQuery := fmt.Sprintf(
-		"SELECT key, message_count, partition, offset_id, last_updated FROM keys %s ORDER BY %s LIMIT $%d OFFSET $%d",
-		where, orderBy, len(args)-1, len(args))
+		"SELECT key, message_count, partition, offset_id, last_updated FROM %s %s ORDER BY %s LIMIT $%d OFFSET $%d",
+		source, where, orderBy, len(args)-1, len(args))
 
 	var (
 		keys    []KeySummary
@@ -609,7 +639,7 @@ func (s *Store) ListKeys(ctx context.Context, cluster, topic, search, sortBy, so
 			defer wg.Done()
 			countCtx, cancel := context.WithTimeout(ctx, 1*time.Second)
 			defer cancel()
-			countQuery := fmt.Sprintf("SELECT COUNT(*) FROM keys %s", where)
+			countQuery := fmt.Sprintf("SELECT COUNT(*) FROM %s %s", source, where)
 			countErr = s.pool.QueryRow(countCtx, countQuery, countArgs...).Scan(&total)
 			if countErr != nil {
 				total = -1

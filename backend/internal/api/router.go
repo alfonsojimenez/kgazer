@@ -187,9 +187,26 @@ func handleListKeys(s *store.Store) http.HandlerFunc {
 			}
 		}
 
-		valueFilter := r.URL.Query().Get("value_filter")
+		params := store.ListKeysParams{
+			Search:      search,
+			SortBy:      sortBy,
+			SortDir:     sortDir,
+			Partitions:  partitions,
+			MinOffset:   minOffset,
+			ValueFilter: r.URL.Query().Get("value_filter"),
+			Page:        page,
+			Limit:       limit,
+		}
+		if v := r.URL.Query().Get("as_of"); v != "" {
+			asOf, err := time.Parse(time.RFC3339, v)
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "as_of must be an RFC 3339 timestamp"})
+				return
+			}
+			params.AsOf = &asOf
+		}
 
-		keys, total, err := s.ListKeys(r.Context(), cluster, topic, search, sortBy, sortDir, partitions, minOffset, valueFilter, page, limit)
+		keys, total, err := s.ListKeys(r.Context(), cluster, topic, params)
 		if errors.Is(err, store.ErrTopicNotFound) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "topic not found"})
 			return

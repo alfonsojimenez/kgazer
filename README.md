@@ -19,6 +19,7 @@ If you've ever needed to answer "what's the current value for this key?" or "wha
 - **Key value search** — Search message values using `field:value` syntax with field autocomplete
 - **Message history** — View every version of a key with syntax-highlighted JSON and inline diffs
 - **Change timeline** — Interactive visual timeline showing when a key changed and how much
+- **Point-in-time view** — Browse a topic as it was at any past instant: every key at its latest version as of that moment
 - **Consumer group monitoring** — See which consumer groups are reading a topic, per-partition lag and consumer assignments
 - **Offset management** — Reset consumer group offsets to earliest, latest or specific per-partition values
 - **Avro & Protobuf support** — Automatic deserialisation via Schema Registry (Confluent-compatible)
@@ -305,7 +306,7 @@ A [chi](https://github.com/go-chi/chi) HTTP router exposing a REST API. Key endp
 | Group | Endpoints | Description |
 |-------|-----------|-------------|
 | **Topics** | `GET /api/topics`, `GET /api/topics/{topic}` | List and detail with consumption progress |
-| **Keys** | `GET /api/topics/{topic}/keys` | Paginated key listing with search, partition filter, offset filter and value search |
+| **Keys** | `GET /api/topics/{topic}/keys` | Paginated key listing with search, partition filter, offset filter, value search and point-in-time snapshots (`as_of`) |
 | **Fields** | `GET /api/topics/{topic}/fields` | Discovered JSON field names for a topic (used by value search autocomplete) |
 | **History** | `GET /api/topics/{topic}/keys/{key}/history` | Message versions for a key (most recent first) |
 | **Timeline** | `GET /api/topics/{topic}/timeline` | Lightweight version metadata for the change timeline visualisation |

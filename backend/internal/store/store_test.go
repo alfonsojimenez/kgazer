@@ -310,7 +310,7 @@ func TestListKeys(t *testing.T) {
 	s.IncrementTopicStats(ctx, id, 3, 3, now.Add(2*time.Second), "json")
 
 	t.Run("list all keys", func(t *testing.T) {
-		keys, total, err := s.ListKeys(ctx, "cluster-a", "orders", "", "", "desc", nil, 0, "", 1, 50)
+		keys, total, err := s.ListKeys(ctx, "cluster-a", "orders", ListKeysParams{SortDir: "desc", Page: 1, Limit: 50})
 		if err != nil {
 			t.Fatalf("ListKeys: %v", err)
 		}
@@ -323,7 +323,7 @@ func TestListKeys(t *testing.T) {
 	})
 
 	t.Run("search filter", func(t *testing.T) {
-		keys, total, err := s.ListKeys(ctx, "cluster-a", "orders", "user", "", "desc", nil, 0, "", 1, 50)
+		keys, total, err := s.ListKeys(ctx, "cluster-a", "orders", ListKeysParams{Search: "user", SortDir: "desc", Page: 1, Limit: 50})
 		if err != nil {
 			t.Fatalf("ListKeys: %v", err)
 		}
@@ -336,7 +336,7 @@ func TestListKeys(t *testing.T) {
 	})
 
 	t.Run("partition filter", func(t *testing.T) {
-		keys, total, err := s.ListKeys(ctx, "cluster-a", "orders", "", "", "desc", []int{1}, 0, "", 1, 50)
+		keys, total, err := s.ListKeys(ctx, "cluster-a", "orders", ListKeysParams{SortDir: "desc", Partitions: []int{1}, Page: 1, Limit: 50})
 		if err != nil {
 			t.Fatalf("ListKeys: %v", err)
 		}
@@ -349,7 +349,7 @@ func TestListKeys(t *testing.T) {
 	})
 
 	t.Run("offset filter", func(t *testing.T) {
-		keys, total, err := s.ListKeys(ctx, "cluster-a", "orders", "", "", "desc", nil, 20, "", 1, 50)
+		keys, total, err := s.ListKeys(ctx, "cluster-a", "orders", ListKeysParams{SortDir: "desc", MinOffset: 20, Page: 1, Limit: 50})
 		if err != nil {
 			t.Fatalf("ListKeys: %v", err)
 		}
@@ -362,7 +362,7 @@ func TestListKeys(t *testing.T) {
 	})
 
 	t.Run("sort by offset", func(t *testing.T) {
-		keys, _, err := s.ListKeys(ctx, "cluster-a", "orders", "", "offset", "asc", nil, 0, "", 1, 50)
+		keys, _, err := s.ListKeys(ctx, "cluster-a", "orders", ListKeysParams{SortBy: "offset", SortDir: "asc", Page: 1, Limit: 50})
 		if err != nil {
 			t.Fatalf("ListKeys: %v", err)
 		}
@@ -375,7 +375,7 @@ func TestListKeys(t *testing.T) {
 	})
 
 	t.Run("topic not found", func(t *testing.T) {
-		_, _, err := s.ListKeys(ctx, "cluster-a", "nonexistent", "", "", "desc", nil, 0, "", 1, 50)
+		_, _, err := s.ListKeys(ctx, "cluster-a", "nonexistent", ListKeysParams{SortDir: "desc", Page: 1, Limit: 50})
 		if err != ErrTopicNotFound {
 			t.Errorf("expected ErrTopicNotFound, got %v", err)
 		}
@@ -446,7 +446,7 @@ func TestPurgeTopicData(t *testing.T) {
 		t.Error("expected no messages after purge")
 	}
 
-	keys, total, _ := s.ListKeys(ctx, "cluster-a", "orders", "", "", "desc", nil, 0, "", 1, 50)
+	keys, total, _ := s.ListKeys(ctx, "cluster-a", "orders", ListKeysParams{SortDir: "desc", Page: 1, Limit: 50})
 	if total != 0 || len(keys) != 0 {
 		t.Error("expected no keys after purge")
 	}
@@ -750,7 +750,7 @@ func TestListKeysValueFilter(t *testing.T) {
 	s.UpsertKey(ctx, id, "key-no-breakdown", 0, 30, now.Add(2*time.Second), body3)
 
 	t.Run("flat value filter", func(t *testing.T) {
-		keys, total, err := s.ListKeys(ctx, "cluster-a", "spend-topic", "", "", "desc", nil, 0, `{"ownerId":"2101498"}`, 1, 50)
+		keys, total, err := s.ListKeys(ctx, "cluster-a", "spend-topic", ListKeysParams{SortDir: "desc", ValueFilter: `{"ownerId":"2101498"}`, Page: 1, Limit: 50})
 		if err != nil {
 			t.Fatalf("ListKeys: %v", err)
 		}
@@ -766,7 +766,7 @@ func TestListKeysValueFilter(t *testing.T) {
 	})
 
 	t.Run("nested array value filter", func(t *testing.T) {
-		keys, total, err := s.ListKeys(ctx, "cluster-a", "spend-topic", "", "", "desc", nil, 0, `{"spendBreakdown":[{"type":"ca:click"}]}`, 1, 50)
+		keys, total, err := s.ListKeys(ctx, "cluster-a", "spend-topic", ListKeysParams{SortDir: "desc", ValueFilter: `{"spendBreakdown":[{"type":"ca:click"}]}`, Page: 1, Limit: 50})
 		if err != nil {
 			t.Fatalf("ListKeys: %v", err)
 		}
@@ -782,7 +782,7 @@ func TestListKeysValueFilter(t *testing.T) {
 	})
 
 	t.Run("nested array filter matches different element type", func(t *testing.T) {
-		keys, total, err := s.ListKeys(ctx, "cluster-a", "spend-topic", "", "", "desc", nil, 0, `{"spendBreakdown":[{"type":"sa:click"}]}`, 1, 50)
+		keys, total, err := s.ListKeys(ctx, "cluster-a", "spend-topic", ListKeysParams{SortDir: "desc", ValueFilter: `{"spendBreakdown":[{"type":"sa:click"}]}`, Page: 1, Limit: 50})
 		if err != nil {
 			t.Fatalf("ListKeys: %v", err)
 		}
@@ -798,7 +798,7 @@ func TestListKeysValueFilter(t *testing.T) {
 	})
 
 	t.Run("nested object value filter", func(t *testing.T) {
-		keys, total, err := s.ListKeys(ctx, "cluster-a", "spend-topic", "", "", "desc", nil, 0, `{"ownerId":"2101500"}`, 1, 50)
+		keys, total, err := s.ListKeys(ctx, "cluster-a", "spend-topic", ListKeysParams{SortDir: "desc", ValueFilter: `{"ownerId":"2101500"}`, Page: 1, Limit: 50})
 		if err != nil {
 			t.Fatalf("ListKeys: %v", err)
 		}
@@ -810,6 +810,74 @@ func TestListKeysValueFilter(t *testing.T) {
 		}
 		if keys[0].Key != "key-no-breakdown" {
 			t.Errorf("expected key-no-breakdown, got %s", keys[0].Key)
+		}
+	})
+}
+
+func TestListKeysAsOf(t *testing.T) {
+	s := setupTestDB(t)
+	ctx := context.Background()
+	cleanDB(t, s)
+
+	id, _, _ := s.UpsertTopic(ctx, "cluster-a", "snapshots", 1, true, "tid-snap")
+	t0 := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	msgs := []PendingMessage{
+		{TopicID: id, Key: "a", Body: []byte(`{"v":1}`), Format: "json", Partition: 0, Offset: 0, Timestamp: t0},
+		{TopicID: id, Key: "b", Body: []byte(`{"v":1}`), Format: "json", Partition: 0, Offset: 1, Timestamp: t0},
+		{TopicID: id, Key: "a", Body: []byte(`{"v":2}`), Format: "json", Partition: 0, Offset: 2, Timestamp: t0.Add(time.Hour)},
+		{TopicID: id, Key: "b", Body: []byte(`null`), Format: "tombstone", Partition: 0, Offset: 3, Timestamp: t0.Add(2 * time.Hour)},
+		{TopicID: id, Key: "c", Body: []byte(`{"v":1}`), Format: "json", Partition: 0, Offset: 4, Timestamp: t0.Add(3 * time.Hour)},
+	}
+	if _, err := s.SaveMessageBatch(ctx, msgs); err != nil {
+		t.Fatalf("SaveMessageBatch: %v", err)
+	}
+
+	listAt := func(t *testing.T, at time.Time, valueFilter string) map[string]KeySummary {
+		t.Helper()
+		keys, total, err := s.ListKeys(ctx, "cluster-a", "snapshots", ListKeysParams{AsOf: &at, ValueFilter: valueFilter, Page: 1, Limit: 50})
+		if err != nil {
+			t.Fatalf("ListKeys: %v", err)
+		}
+		if total != len(keys) {
+			t.Errorf("expected total=%d, got %d", len(keys), total)
+		}
+		byKey := make(map[string]KeySummary, len(keys))
+		for _, k := range keys {
+			byKey[k.Key] = k
+		}
+		return byKey
+	}
+
+	t.Run("before any message", func(t *testing.T) {
+		if got := listAt(t, t0.Add(-time.Minute), ""); len(got) != 0 {
+			t.Errorf("expected no keys, got %v", got)
+		}
+	})
+
+	t.Run("resolves latest version at the instant", func(t *testing.T) {
+		got := listAt(t, t0.Add(90*time.Minute), "")
+		if len(got) != 2 {
+			t.Fatalf("expected keys a and b, got %v", got)
+		}
+		if got["a"].Offset != 2 || got["a"].MessageCount != 2 {
+			t.Errorf("expected a at offset 2 with 2 versions, got %+v", got["a"])
+		}
+	})
+
+	t.Run("omits keys tombstoned by then", func(t *testing.T) {
+		got := listAt(t, t0.Add(3*time.Hour), "")
+		if _, ok := got["b"]; ok {
+			t.Errorf("expected tombstoned key b to be omitted, got %v", got)
+		}
+		if len(got) != 2 {
+			t.Errorf("expected keys a and c, got %v", got)
+		}
+	})
+
+	t.Run("value filter applies to the historical body", func(t *testing.T) {
+		got := listAt(t, t0.Add(30*time.Minute), `{"v":1}`)
+		if len(got) != 2 {
+			t.Errorf("expected a and b with v=1 at that time, got %v", got)
 		}
 	})
 }
