@@ -50,10 +50,17 @@ type KeySummary struct {
 	LastUpdated  time.Time `json:"last_updated"`
 }
 
+type Header struct {
+	Key    string  `json:"key"`
+	Value  *string `json:"value"`
+	Base64 bool    `json:"base64,omitempty"`
+}
+
 type Message struct {
 	ID        int64           `json:"id"`
 	Key       string          `json:"key"`
 	Body      json.RawMessage `json:"body"`
+	Headers   json.RawMessage `json:"headers"`
 	Partition int32           `json:"partition"`
 	Offset    int64           `json:"offset"`
 	Timestamp time.Time       `json:"timestamp"`
@@ -127,6 +134,7 @@ type PendingMessage struct {
 	TopicID   int
 	Key       string
 	Body      []byte
+	Headers   []byte
 	Format    string
 	Partition int32
 	Offset    int64
@@ -140,15 +148,15 @@ func (s *Store) SaveMessageBatch(ctx context.Context, msgs []PendingMessage) (in
 
 	var b strings.Builder
 	b.Grow(len(msgs) * 40)
-	b.WriteString("INSERT INTO messages (topic_id, key, body, format, partition, offset_id, timestamp) VALUES ")
-	args := make([]interface{}, 0, len(msgs)*7)
+	b.WriteString("INSERT INTO messages (topic_id, key, body, headers, format, partition, offset_id, timestamp) VALUES ")
+	args := make([]interface{}, 0, len(msgs)*8)
 	for i, m := range msgs {
 		if i > 0 {
 			b.WriteByte(',')
 		}
-		base := i * 7
-		fmt.Fprintf(&b, "($%d,$%d,$%d,$%d,$%d,$%d,$%d)", base+1, base+2, base+3, base+4, base+5, base+6, base+7)
-		args = append(args, m.TopicID, m.Key, m.Body, m.Format, m.Partition, m.Offset, m.Timestamp)
+		base := i * 8
+		fmt.Fprintf(&b, "($%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d)", base+1, base+2, base+3, base+4, base+5, base+6, base+7, base+8)
+		args = append(args, m.TopicID, m.Key, m.Body, m.Headers, m.Format, m.Partition, m.Offset, m.Timestamp)
 	}
 	b.WriteString(" ON CONFLICT (topic_id, partition, offset_id) DO NOTHING")
 
@@ -690,7 +698,7 @@ func (s *Store) GetKeyHistory(ctx context.Context, cluster, topic, key string, p
 		WITH t AS (
 			SELECT id FROM topics WHERE cluster = $1 AND name = $2
 		)
-		SELECT key, body, partition, offset_id, timestamp,
+		SELECT key, body, COALESCE(headers, '[]'::jsonb), partition, offset_id, timestamp,
 		       COUNT(*) OVER() AS total
 		FROM messages
 		WHERE topic_id = (SELECT id FROM t) AND key = $3
@@ -707,7 +715,7 @@ func (s *Store) GetKeyHistory(ctx context.Context, cluster, topic, key string, p
 	var total int
 	for rows.Next() {
 		var m Message
-		if err := rows.Scan(&m.Key, &m.Body, &m.Partition, &m.Offset, &m.Timestamp, &total); err != nil {
+		if err := rows.Scan(&m.Key, &m.Body, &m.Headers, &m.Partition, &m.Offset, &m.Timestamp, &total); err != nil {
 			return nil, 0, fmt.Errorf("scanning message: %w", err)
 		}
 		m.ID = m.Offset

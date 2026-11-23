@@ -42,6 +42,7 @@ func setupTestDB(t *testing.T) *Store {
 			topic_id   INT NOT NULL REFERENCES topics(id),
 			key        TEXT NOT NULL,
 			body       JSONB NOT NULL,
+			headers    JSONB,
 			format     TEXT NOT NULL DEFAULT 'json',
 			partition  INT NOT NULL,
 			offset_id  BIGINT NOT NULL,
@@ -880,4 +881,39 @@ func TestListKeysAsOf(t *testing.T) {
 			t.Errorf("expected a and b with v=1 at that time, got %v", got)
 		}
 	})
+}
+
+func TestGetKeyHistoryHeaders(t *testing.T) {
+	s := setupTestDB(t)
+	ctx := context.Background()
+	cleanDB(t, s)
+
+	id, _, _ := s.UpsertTopic(ctx, "cluster-a", "with-headers", 1, true, "tid-h")
+	now := time.Now()
+	msgs := []PendingMessage{
+		{TopicID: id, Key: "k", Body: []byte(`{"v":1}`), Format: "json", Partition: 0, Offset: 0, Timestamp: now},
+		{TopicID: id, Key: "k", Body: []byte(`{"v":2}`), Headers: []byte(`[{"key":"traceparent","value":"00-abc"},{"key":"empty","value":null}]`), Format: "json", Partition: 0, Offset: 1, Timestamp: now.Add(time.Second)},
+	}
+	if _, err := s.SaveMessageBatch(ctx, msgs); err != nil {
+		t.Fatalf("SaveMessageBatch: %v", err)
+	}
+
+	history, _, err := s.GetKeyHistory(ctx, "cluster-a", "with-headers", "k", 1, 10)
+	if err != nil {
+		t.Fatalf("GetKeyHistory: %v", err)
+	}
+	if len(history) != 2 {
+		t.Fatalf("expected 2 versions, got %d", len(history))
+	}
+
+	var latest []Header
+	if err := json.Unmarshal(history[0].Headers, &latest); err != nil {
+		t.Fatalf("unmarshal headers: %v", err)
+	}
+	if len(latest) != 2 || latest[0].Key != "traceparent" || *latest[0].Value != "00-abc" || latest[1].Value != nil {
+		t.Errorf("unexpected headers: %s", history[0].Headers)
+	}
+	if string(history[1].Headers) != "[]" {
+		t.Errorf("expected empty headers array for message without headers, got %s", history[1].Headers)
+	}
 }

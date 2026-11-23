@@ -594,6 +594,11 @@ components:
           type: string
         body:
           description: JSON-encoded message body
+        headers:
+          type: array
+          description: Kafka record headers in their original order (duplicate keys allowed). Empty for messages without headers or consumed before headers were stored.
+          items:
+            $ref: "#/components/schemas/MessageHeader"
         partition:
           type: integer
         offset:
@@ -602,6 +607,19 @@ components:
         timestamp:
           type: string
           format: date-time
+
+    MessageHeader:
+      type: object
+      properties:
+        key:
+          type: string
+        value:
+          type: string
+          nullable: true
+          description: UTF-8 header value, or base64 when `base64` is true. Null for null-valued headers.
+        base64:
+          type: boolean
+          description: Present and true when the raw value was not valid UTF-8
 
     PaginatedKeys:
       type: object

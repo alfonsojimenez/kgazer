@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 
@@ -248,6 +249,7 @@ func Start(ctx context.Context, cluster config.Cluster, s *store.Store, tracker 
 					TopicID:   topicID,
 					Key:       key,
 					Body:      body,
+					Headers:   encodeHeaders(msg.Headers),
 					Format:    format,
 					Partition: msg.TopicPartition.Partition,
 					Offset:    int64(msg.TopicPartition.Offset),
@@ -469,6 +471,28 @@ func sanitizeBody(value []byte, dec *decoder.Decoder) ([]byte, string) {
 	encoded := base64.StdEncoding.EncodeToString(value)
 	result, _ := json.Marshal(map[string]string{"_binary": encoded})
 	return result, "other"
+}
+
+func encodeHeaders(headers []kafka.Header) []byte {
+	if len(headers) == 0 {
+		return nil
+	}
+	out := make([]store.Header, len(headers))
+	for i, h := range headers {
+		out[i] = store.Header{Key: strings.ReplaceAll(h.Key, "\x00", "")}
+		switch {
+		case h.Value == nil:
+		case utf8.Valid(h.Value) && !bytes.ContainsRune(h.Value, 0):
+			v := string(h.Value)
+			out[i].Value = &v
+		default:
+			v := base64.StdEncoding.EncodeToString(h.Value)
+			out[i].Value = &v
+			out[i].Base64 = true
+		}
+	}
+	encoded, _ := json.Marshal(out)
+	return encoded
 }
 
 func stripNullBytes(b []byte) []byte {

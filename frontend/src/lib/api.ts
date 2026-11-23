@@ -27,10 +27,17 @@ export interface KeySummary {
   last_updated: string;
 }
 
+export interface MessageHeader {
+  key: string;
+  value: string | null;
+  base64?: boolean;
+}
+
 export interface Message {
   id: number;
   key: string;
   body: unknown;
+  headers?: MessageHeader[];
   partition: number;
   offset: number;
   timestamp: string;

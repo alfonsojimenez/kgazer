@@ -10,6 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 - Point-in-time view: a date/time picker on the key browser shows every key as it was at that instant (latest version at or before it, keys tombstoned by then hidden), backed by a new `as_of` parameter on `GET /api/topics/{topic}/keys`
 - Key comparison page (`/compare`) that diffs the latest value of two keys across topics or clusters, reachable from the sidebar and from "Compare with…" on the history page; the selection lives in the URL so comparisons can be shared
+- Kafka record headers are now stored (new nullable `messages.headers` JSONB column, migration 007) and shown in a collapsible section on each version in the message history; history responses include a `headers` array. Messages consumed before this change show no headers until the topic is re-consumed
 
 ## [1.2.0] - 2026-09-29
 

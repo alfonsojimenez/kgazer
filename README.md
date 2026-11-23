@@ -17,7 +17,7 @@ If you've ever needed to answer "what's the current value for this key?" or "wha
 - **Multi-cluster support** — Connect to multiple Kafka clusters simultaneously
 - **Key browser** — Search, filter and paginate through all keys in a compacted topic
 - **Key value search** — Search message values using `field:value` syntax with field autocomplete
-- **Message history** — View every version of a key with syntax-highlighted JSON and inline diffs
+- **Message history** — View every version of a key with syntax-highlighted JSON, record headers and inline diffs
 - **Change timeline** — Interactive visual timeline showing when a key changed and how much
 - **Key comparison** — Diff the latest value of any two keys, across topics or clusters (e.g. staging vs. production)
 - **Point-in-time view** — Browse a topic as it was at any past instant: every key at its latest version as of that moment
@@ -333,7 +333,7 @@ Three tables, defined in [`backend/migrations/`](backend/migrations/):
 
 **`topics`** — one row per cluster+topic combination. Stores partition count, compacted flag, message format, Kafka topic UUID and cached stats (message count, key count, last message timestamp).
 
-**`messages`** — every consumed message. Primary key is the composite `(topic_id, partition, offset_id)` with `ON CONFLICT DO NOTHING` for idempotent writes. Stores the deserialised body as JSONB.
+**`messages`** — every consumed message. Primary key is the composite `(topic_id, partition, offset_id)` with `ON CONFLICT DO NOTHING` for idempotent writes. Stores the deserialised body as JSONB and the record headers as an ordered JSONB array (binary header values are base64-encoded).
 
 **`keys`** — one row per unique key per topic. Tracks the latest partition, offset, timestamp and a cached copy of the latest message body (JSONB). Used for the key browser with indexes for offset-based sorting, time-based sorting, trigram key search and GIN `jsonb_path_ops` value search.
 

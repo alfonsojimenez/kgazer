@@ -12,6 +12,7 @@ import { DiffTimeline } from "@/components/DiffTimeline";
 import { Pagination } from "@/components/Pagination";
 import { JsonViewer } from "@/components/JsonViewer";
 import { MessageDiff } from "@/components/MessageDiff";
+import { MessageHeaders } from "@/components/MessageHeaders";
 import { Clock, GitCompare, Hash, Layers, Trash2 } from "lucide-react";
 import { compareUrl } from "@/lib/compare";
 
@@ -180,6 +181,7 @@ export function HistoryPage() {
                     )}
                   </CardHeader>
                   <CardContent>
+                    <MessageHeaders headers={msg.headers} />
                     {msg.body === null ? (
                       <div className="flex items-center gap-2 rounded-lg bg-red-500/10 border border-red-500/20 p-4 text-sm text-red-500">
                         <Trash2 className="h-4 w-4 shrink-0" />

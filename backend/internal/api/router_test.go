@@ -56,7 +56,7 @@ func setupTestStore(t *testing.T) *store.Store {
 			UNIQUE(cluster, name))`,
 		`CREATE TABLE IF NOT EXISTS messages (
 			topic_id INT NOT NULL REFERENCES topics(id),
-			key TEXT NOT NULL, body JSONB NOT NULL, format TEXT NOT NULL DEFAULT 'json',
+			key TEXT NOT NULL, body JSONB NOT NULL, headers JSONB, format TEXT NOT NULL DEFAULT 'json',
 			partition INT NOT NULL, offset_id BIGINT NOT NULL, timestamp TIMESTAMPTZ NOT NULL,
 			created_at TIMESTAMPTZ DEFAULT NOW(), PRIMARY KEY(topic_id, partition, offset_id))`,
 		`CREATE TABLE IF NOT EXISTS keys (
