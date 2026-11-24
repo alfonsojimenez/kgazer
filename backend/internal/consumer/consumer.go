@@ -117,7 +117,6 @@ func Start(ctx context.Context, cluster config.Cluster, s *store.Store, tracker 
 		}
 		type topicBatchStats struct {
 			messages int
-			keys     map[string]bool
 			formats  map[string]bool
 			latestTS time.Time
 		}
@@ -152,17 +151,6 @@ func Start(ctx context.Context, cluster config.Cluster, s *store.Store, tracker 
 					"cluster", cluster.Name, "batch_size", len(batch))
 			}
 			if inserted > 0 {
-				for tid, stats := range batchStats {
-					batchFormat := "other"
-					if len(stats.formats) == 1 {
-						for f := range stats.formats {
-							batchFormat = f
-						}
-					}
-					if err := s.IncrementTopicStats(ctx, tid, stats.messages, len(stats.keys), stats.latestTS, batchFormat); err != nil {
-						slog.Error("stats increment failed", "topic_id", tid, "error", err)
-					}
-				}
 				entries := make([]store.KeyEntry, 0, len(keyAggs))
 				for tk, agg := range keyAggs {
 					entries = append(entries, store.KeyEntry{
@@ -175,8 +163,20 @@ func Start(ctx context.Context, cluster config.Cluster, s *store.Store, tracker 
 						Body:      agg.body,
 					})
 				}
-				if err := s.UpsertKeyBatch(ctx, entries); err != nil {
+				newKeys, err := s.UpsertKeyBatch(ctx, entries)
+				if err != nil {
 					slog.Error("key upsert failed", "cluster", cluster.Name, "error", err)
+				}
+				for tid, stats := range batchStats {
+					batchFormat := "other"
+					if len(stats.formats) == 1 {
+						for f := range stats.formats {
+							batchFormat = f
+						}
+					}
+					if err := s.IncrementTopicStats(ctx, tid, stats.messages, newKeys[tid], stats.latestTS, batchFormat); err != nil {
+						slog.Error("stats increment failed", "topic_id", tid, "error", err)
+					}
 				}
 			}
 			batch = batch[:0]
@@ -257,11 +257,10 @@ func Start(ctx context.Context, cluster config.Cluster, s *store.Store, tracker 
 				})
 
 				if batchStats[topicID] == nil {
-					batchStats[topicID] = &topicBatchStats{keys: make(map[string]bool), formats: make(map[string]bool)}
+					batchStats[topicID] = &topicBatchStats{formats: make(map[string]bool)}
 				}
 				bs := batchStats[topicID]
 				bs.messages++
-				bs.keys[key] = true
 				bs.formats[format] = true
 				if ts.After(bs.latestTS) {
 					bs.latestTS = ts

@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+### Fixed
+
+- Topic key counts were inflated because every key in a consumer batch was added to `topics.key_count`, including keys already seen. Only newly inserted keys are counted now, and migration 009 recomputes existing counts
+- The `keys` table now autovacuums and auto-analyzes at 2% changed rows instead of 20%, keeping index-only scans (counts, filtered listings) fast on large topics. The syncer no longer runs `ANALYZE keys` on every cluster's 60-second sync, which re-sampled the whole table up to once per cluster per minute
+
 ### Added
 
 - Point-in-time view: a date/time picker on the key browser shows every key as it was at that instant (latest version at or before it, keys tombstoned by then hidden unless the Deleted filter is selected), backed by a new `as_of` parameter on `GET /api/topics/{topic}/keys`

@@ -450,9 +450,10 @@ func (s *Store) UpsertKey(ctx context.Context, topicID int, key string, partitio
 	return err
 }
 
-func (s *Store) UpsertKeyBatch(ctx context.Context, entries []KeyEntry) error {
+// UpsertKeyBatch returns, per topic ID, how many keys were inserted (not updated).
+func (s *Store) UpsertKeyBatch(ctx context.Context, entries []KeyEntry) (map[int]int, error) {
 	if len(entries) == 0 {
-		return nil
+		return nil, nil
 	}
 	query := `INSERT INTO keys (topic_id, key, message_count, partition, offset_id, last_updated, body, deleted_at) VALUES `
 	args := make([]interface{}, 0, len(entries)*8)
@@ -474,9 +475,26 @@ func (s *Store) UpsertKeyBatch(ctx context.Context, entries []KeyEntry) error {
 		offset_id = EXCLUDED.offset_id,
 		last_updated = GREATEST(keys.last_updated, EXCLUDED.last_updated),
 		body = EXCLUDED.body,
-		deleted_at = EXCLUDED.deleted_at`
-	_, err := s.writePool.Exec(ctx, query, args...)
-	return err
+		deleted_at = EXCLUDED.deleted_at
+		RETURNING topic_id, xmax = 0`
+	rows, err := s.writePool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	newKeys := make(map[int]int)
+	for rows.Next() {
+		var topicID int
+		var inserted bool
+		if err := rows.Scan(&topicID, &inserted); err != nil {
+			return nil, err
+		}
+		if inserted {
+			newKeys[topicID]++
+		}
+	}
+	return newKeys, rows.Err()
 }
 
 func (s *Store) DeleteTopicKeys(ctx context.Context, cluster, topic string) error {

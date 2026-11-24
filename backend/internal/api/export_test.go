@@ -27,7 +27,7 @@ func seedExportTopic(t *testing.T) http.Handler {
 	if _, err := s.SaveMessageBatch(ctx, msgs); err != nil {
 		t.Fatalf("SaveMessageBatch: %v", err)
 	}
-	err := s.UpsertKeyBatch(ctx, []store.KeyEntry{
+	_, err := s.UpsertKeyBatch(ctx, []store.KeyEntry{
 		{TopicID: id, Key: "a", Count: 2, Offset: 1, Timestamp: t0.Add(time.Minute), Body: msgs[1].Body},
 		{TopicID: id, Key: "b", Count: 1, Offset: 2, Timestamp: t0.Add(2 * time.Minute), Body: msgs[2].Body},
 	})

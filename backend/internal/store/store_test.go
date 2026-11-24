@@ -939,7 +939,7 @@ func TestTombstoneTracking(t *testing.T) {
 	t0 := time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC)
 	upsert := func(t *testing.T, key string, offset int64, ts time.Time, body string) {
 		t.Helper()
-		err := s.UpsertKeyBatch(ctx, []KeyEntry{{TopicID: id, Key: key, Count: 1, Partition: 0, Offset: offset, Timestamp: ts, Body: []byte(body)}})
+		_, err := s.UpsertKeyBatch(ctx, []KeyEntry{{TopicID: id, Key: key, Count: 1, Partition: 0, Offset: offset, Timestamp: ts, Body: []byte(body)}})
 		if err != nil {
 			t.Fatalf("UpsertKeyBatch: %v", err)
 		}
@@ -995,4 +995,33 @@ func TestTombstoneTracking(t *testing.T) {
 			t.Errorf("expected no deleted keys, got %+v", deleted)
 		}
 	})
+}
+
+func TestUpsertKeyBatchCountsOnlyNewKeys(t *testing.T) {
+	s := setupTestDB(t)
+	ctx := context.Background()
+	cleanDB(t, s)
+
+	a, _, _ := s.UpsertTopic(ctx, "cluster-a", "topic-a", 1, true, "tid-a")
+	b, _, _ := s.UpsertTopic(ctx, "cluster-a", "topic-b", 1, true, "tid-b")
+	now := time.Now()
+	entry := func(topicID int, key string, offset int64) KeyEntry {
+		return KeyEntry{TopicID: topicID, Key: key, Count: 1, Offset: offset, Timestamp: now, Body: []byte(`{}`)}
+	}
+
+	newKeys, err := s.UpsertKeyBatch(ctx, []KeyEntry{entry(a, "k1", 0), entry(a, "k2", 1), entry(b, "k1", 0)})
+	if err != nil {
+		t.Fatalf("UpsertKeyBatch: %v", err)
+	}
+	if newKeys[a] != 2 || newKeys[b] != 1 {
+		t.Errorf("first batch: expected a=2 b=1, got %v", newKeys)
+	}
+
+	newKeys, err = s.UpsertKeyBatch(ctx, []KeyEntry{entry(a, "k1", 2), entry(a, "k3", 3)})
+	if err != nil {
+		t.Fatalf("UpsertKeyBatch: %v", err)
+	}
+	if newKeys[a] != 1 || newKeys[b] != 0 {
+		t.Errorf("second batch: expected only k3 to be new, got %v", newKeys)
+	}
 }
