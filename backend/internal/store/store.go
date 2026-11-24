@@ -638,10 +638,11 @@ func (s *Store) buildKeysQuery(ctx context.Context, cluster, topic string, p Lis
 	q.where = "WHERE " + strings.Join(conditions, " AND ")
 
 	sortColumn := "last_updated"
-	switch p.SortBy {
-	case "offset":
+	switch {
+	case p.SortBy == "offset":
 		sortColumn = "offset_id"
-	case "deleted_at":
+	case p.SortBy == "deleted_at", p.Status == KeyStatusDeleted && p.AsOf == nil:
+		// Tombstones set deleted_at = last_updated, so this keeps the order and uses the partial index.
 		sortColumn = "deleted_at"
 	}
 	q.orderBy = sortColumn + " " + sanitizeSortDir(p.SortDir)
