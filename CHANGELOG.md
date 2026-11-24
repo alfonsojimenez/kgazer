@@ -9,6 +9,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ### Fixed
 
 - Topic key counts were inflated because every key in a consumer batch was added to `topics.key_count`, including keys already seen. Only newly inserted keys are counted now, and migration 009 recomputes existing counts
+- Point-in-time snapshots no longer scan every stored version of the topic: keys unchanged since `as_of` are read from the keys table and only keys changed afterwards are resolved from history, one index lookup per key, with ordering and paging pushed into both halves (a 493k-message topic went from ~16s to ~20ms warm)
+- The live-keys count is now derived as total keys minus deleted keys instead of counting the table, so `status=live` returns an exact total immediately
+- Consumer startup reads each partition's resume offset with one primary-key probe instead of aggregating every key of the topic (up to 16s per topic on large topics)
+- The bundled PostgreSQL container gets a 1 GB `/dev/shm`; the Docker default of 64 MB made parallel queries and vacuums fail with "could not resize shared memory segment"
 - The `keys` table now autovacuums and auto-analyzes at 2% changed rows instead of 20%, keeping index-only scans (counts, filtered listings) fast on large topics. The syncer no longer runs `ANALYZE keys` on every cluster's 60-second sync, which re-sampled the whole table up to once per cluster per minute
 
 ### Added

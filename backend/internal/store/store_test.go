@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -816,6 +817,21 @@ func TestListKeysValueFilter(t *testing.T) {
 	})
 }
 
+// saveAsConsumer stores messages and keys the way the consumer does, one message per flush.
+func saveAsConsumer(t *testing.T, s *Store, msgs []PendingMessage) {
+	t.Helper()
+	ctx := context.Background()
+	for _, m := range msgs {
+		if _, err := s.SaveMessageBatch(ctx, []PendingMessage{m}); err != nil {
+			t.Fatalf("SaveMessageBatch: %v", err)
+		}
+		entry := KeyEntry{TopicID: m.TopicID, Key: m.Key, Count: 1, Partition: m.Partition, Offset: m.Offset, Timestamp: m.Timestamp, Body: m.Body}
+		if _, err := s.UpsertKeyBatch(ctx, []KeyEntry{entry}); err != nil {
+			t.Fatalf("UpsertKeyBatch: %v", err)
+		}
+	}
+}
+
 func TestListKeysAsOf(t *testing.T) {
 	s := setupTestDB(t)
 	ctx := context.Background()
@@ -830,9 +846,7 @@ func TestListKeysAsOf(t *testing.T) {
 		{TopicID: id, Key: "b", Body: []byte(`null`), Format: "tombstone", Partition: 0, Offset: 3, Timestamp: t0.Add(2 * time.Hour)},
 		{TopicID: id, Key: "c", Body: []byte(`{"v":1}`), Format: "json", Partition: 0, Offset: 4, Timestamp: t0.Add(3 * time.Hour)},
 	}
-	if _, err := s.SaveMessageBatch(ctx, msgs); err != nil {
-		t.Fatalf("SaveMessageBatch: %v", err)
-	}
+	saveAsConsumer(t, s, msgs)
 
 	listAt := func(t *testing.T, at time.Time, valueFilter string) map[string]KeySummary {
 		t.Helper()
@@ -1023,5 +1037,81 @@ func TestUpsertKeyBatchCountsOnlyNewKeys(t *testing.T) {
 	}
 	if newKeys[a] != 1 || newKeys[b] != 0 {
 		t.Errorf("second batch: expected only k3 to be new, got %v", newKeys)
+	}
+}
+
+func TestListKeysAsOfPaging(t *testing.T) {
+	s := setupTestDB(t)
+	ctx := context.Background()
+	cleanDB(t, s)
+
+	id, _, _ := s.UpsertTopic(ctx, "cluster-a", "paging", 1, true, "tid-page")
+	t0 := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
+	var msgs []PendingMessage
+	// k0..k5 written at t0+i min; odd keys are rewritten after as_of, so the snapshot
+	// mixes keys served from the keys table with keys resolved from history.
+	for i := 0; i < 6; i++ {
+		msgs = append(msgs, PendingMessage{TopicID: id, Key: fmt.Sprintf("k%d", i), Body: []byte(fmt.Sprintf(`{"v":%d}`, i)),
+			Format: "json", Offset: int64(i), Timestamp: t0.Add(time.Duration(i) * time.Minute)})
+	}
+	for i := 1; i < 6; i += 2 {
+		msgs = append(msgs, PendingMessage{TopicID: id, Key: fmt.Sprintf("k%d", i), Body: []byte(`{"v":"new"}`),
+			Format: "json", Offset: int64(10 + i), Timestamp: t0.Add(time.Hour)})
+	}
+	saveAsConsumer(t, s, msgs)
+
+	asOf := t0.Add(30 * time.Minute)
+	var got []string
+	for page := 1; page <= 3; page++ {
+		keys, _, err := s.ListKeys(ctx, "cluster-a", "paging", ListKeysParams{AsOf: &asOf, Page: page, Limit: 2})
+		if err != nil {
+			t.Fatalf("ListKeys page %d: %v", page, err)
+		}
+		for _, k := range keys {
+			got = append(got, k.Key)
+			if k.MessageCount != 1 {
+				t.Errorf("%s: expected 1 version as of snapshot, got %d", k.Key, k.MessageCount)
+			}
+		}
+	}
+	want := []string{"k5", "k4", "k3", "k2", "k1", "k0"}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("expected newest-first %v across pages, got %v", want, got)
+	}
+
+	keys, _, err := s.ListKeys(ctx, "cluster-a", "paging", ListKeysParams{AsOf: &asOf, ValueFilter: `{"v":"new"}`, Page: 1, Limit: 10})
+	if err != nil {
+		t.Fatalf("ListKeys: %v", err)
+	}
+	if len(keys) != 0 {
+		t.Errorf("expected later values to be invisible as of snapshot, got %+v", keys)
+	}
+}
+
+func TestListKeysLiveCount(t *testing.T) {
+	s := setupTestDB(t)
+	ctx := context.Background()
+	cleanDB(t, s)
+
+	id, _, _ := s.UpsertTopic(ctx, "cluster-a", "live-count", 1, true, "tid-live")
+	now := time.Now()
+	newKeys, err := s.UpsertKeyBatch(ctx, []KeyEntry{
+		{TopicID: id, Key: "a", Count: 1, Offset: 0, Timestamp: now, Body: []byte(`{}`)},
+		{TopicID: id, Key: "b", Count: 1, Offset: 1, Timestamp: now, Body: []byte(`{}`)},
+		{TopicID: id, Key: "c", Count: 1, Offset: 2, Timestamp: now, Body: []byte(`null`)},
+	})
+	if err != nil {
+		t.Fatalf("UpsertKeyBatch: %v", err)
+	}
+	if err := s.IncrementTopicStats(ctx, id, 3, newKeys[id], now, "json"); err != nil {
+		t.Fatalf("IncrementTopicStats: %v", err)
+	}
+
+	keys, total, err := s.ListKeys(ctx, "cluster-a", "live-count", ListKeysParams{Status: KeyStatusLive, Page: 1, Limit: 1})
+	if err != nil {
+		t.Fatalf("ListKeys: %v", err)
+	}
+	if total != 2 || len(keys) != 1 {
+		t.Errorf("expected total=2 with a 1-row page, got total=%d rows=%d", total, len(keys))
 	}
 }

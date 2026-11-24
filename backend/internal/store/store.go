@@ -306,8 +306,15 @@ type PartitionOffset struct {
 }
 
 func (s *Store) GetMaxOffsets(ctx context.Context, topicID int) ([]PartitionOffset, error) {
-	rows, err := s.pool.Query(ctx,
-		`SELECT partition, MAX(offset_id) FROM keys WHERE topic_id = $1 GROUP BY partition ORDER BY partition`, topicID)
+	// One primary-key probe per partition instead of aggregating every key of the topic.
+	rows, err := s.pool.Query(ctx, `
+		SELECT p.partition, o.offset_id
+		FROM generate_series(0, (SELECT partitions - 1 FROM topics WHERE id = $1)) AS p(partition)
+		CROSS JOIN LATERAL (
+			SELECT offset_id FROM messages WHERE topic_id = $1 AND partition = p.partition
+			ORDER BY offset_id DESC LIMIT 1
+		) o
+		ORDER BY p.partition`, topicID)
 	if err != nil {
 		return nil, err
 	}
@@ -586,17 +593,24 @@ type ListKeysParams struct {
 }
 
 type keysQuery struct {
-	topicID    int
-	keyCount   int
-	source     string
-	where      string
-	orderBy    string
-	args       []interface{}
-	hasFilters bool
+	topicID     int
+	keyCount    int
+	source      string
+	where       string
+	orderBy     string
+	args        []interface{}
+	hasFilters  bool
+	countColumn string
+	// branches holds the two halves of an as_of snapshot so ListKeys can push
+	// ORDER BY/LIMIT into each one; empty when AsOf is nil.
+	branches []string
 }
 
+// Columns every key source exposes; filters, sorting and paging run on top of them.
+const keyColumns = "topic_id, key, partition, offset_id, last_updated, body, message_count, deleted_at"
+
 func (s *Store) buildKeysQuery(ctx context.Context, cluster, topic string, p ListKeysParams) (*keysQuery, error) {
-	q := &keysQuery{source: "keys"}
+	q := &keysQuery{source: "keys", countColumn: "message_count"}
 	err := s.pool.QueryRow(ctx,
 		`SELECT id, key_count FROM topics WHERE cluster = $1 AND name = $2`,
 		cluster, topic).Scan(&q.topicID, &q.keyCount)
@@ -614,14 +628,25 @@ func (s *Store) buildKeysQuery(ctx context.Context, cluster, topic string, p Lis
 
 	if p.AsOf != nil {
 		q.args = append(q.args, *p.AsOf)
-		q.source = fmt.Sprintf(`(
-			SELECT DISTINCT ON (key) topic_id, key, partition, offset_id, timestamp AS last_updated, body,
-			       COUNT(*) OVER (PARTITION BY key) AS message_count,
-			       CASE WHEN body = 'null'::jsonb THEN timestamp END AS deleted_at
-			FROM messages
-			WHERE topic_id = $1 AND timestamp <= $%d
-			ORDER BY key, timestamp DESC, offset_id DESC
-		) AS snapshot`, len(q.args))
+		asOfIdx := len(q.args)
+		// Keys untouched since as_of are already correct in the keys table; only keys
+		// changed afterwards need their historical version looked up in messages.
+		unchanged := fmt.Sprintf(`SELECT %s FROM keys WHERE topic_id = $1 AND last_updated <= $%d`, keyColumns, asOfIdx)
+		// The body is fetched lazily by primary key so it is only detoasted for rows a
+		// value filter or the export actually reads, not for every changed key.
+		changed := fmt.Sprintf(`SELECT k.topic_id, k.key, m.partition, m.offset_id, m.timestamp AS last_updated,
+				(SELECT body FROM messages b WHERE b.topic_id = $1 AND b.partition = m.partition AND b.offset_id = m.offset_id) AS body,
+				NULL::int AS message_count, CASE WHEN m.format = 'tombstone' THEN m.timestamp END AS deleted_at
+			FROM keys k CROSS JOIN LATERAL (
+				SELECT partition, offset_id, timestamp, format FROM messages
+				WHERE topic_id = k.topic_id AND key = k.key AND timestamp <= $%[1]d
+				ORDER BY timestamp DESC, offset_id DESC LIMIT 1
+			) m
+			WHERE k.topic_id = $1 AND k.last_updated > $%[1]d`, asOfIdx)
+		q.branches = []string{unchanged, changed}
+		q.source = fmt.Sprintf("(%s UNION ALL %s) AS snapshot", unchanged, changed)
+		q.countColumn = fmt.Sprintf(`(SELECT COUNT(*) FROM messages c
+			WHERE c.topic_id = $1 AND c.key = snapshot.key AND c.timestamp <= $%d)`, asOfIdx)
 	}
 
 	switch p.Status {
@@ -670,6 +695,11 @@ func (s *Store) buildKeysQuery(ctx context.Context, cluster, topic string, p Lis
 	return q, nil
 }
 
+func (q *keysQuery) isOnlyLiveFilter(p ListKeysParams) bool {
+	return p.Status == KeyStatusLive && p.Search == "" && len(p.Partitions) == 0 &&
+		p.MinOffset == 0 && p.ValueFilter == "" && p.AsOf == nil
+}
+
 func (s *Store) readOnlyTx(ctx context.Context, valueFilter string) (pgx.Tx, error) {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
 	if err != nil {
@@ -692,15 +722,34 @@ func (s *Store) ListKeys(ctx context.Context, cluster, topic string, p ListKeysP
 
 	countArgs := q.args
 	args := append(append([]interface{}{}, q.args...), p.Limit, (p.Page-1)*p.Limit)
+	limitIdx, offsetIdx := len(args)-1, len(args)
 
 	var total int
 	if !q.hasFilters {
 		total = q.keyCount
 	}
+	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM %s %s", q.source, q.where)
+	if q.isOnlyLiveFilter(p) {
+		// live = all keys minus tombstoned ones; the latter is a cheap partial-index count.
+		countQuery = "SELECT $2::int - COUNT(*) FROM keys WHERE topic_id = $1 AND deleted_at IS NOT NULL"
+		countArgs = []interface{}{q.topicID, q.keyCount}
+	}
+
+	source := q.source
+	if len(q.branches) > 0 {
+		// Each branch is ordered and limited before the union so PostgreSQL walks indexes
+		// for just the requested page instead of materialising the whole snapshot.
+		perBranch := make([]string, len(q.branches))
+		for i, b := range q.branches {
+			perBranch[i] = fmt.Sprintf("(SELECT * FROM (%s) AS b %s ORDER BY %s LIMIT $%d::bigint + $%d::bigint)",
+				b, q.where, q.orderBy, limitIdx, offsetIdx)
+		}
+		source = fmt.Sprintf("(%s) AS snapshot", strings.Join(perBranch, " UNION ALL "))
+	}
 
 	dataQuery := fmt.Sprintf(
-		"SELECT key, message_count, partition, offset_id, last_updated, deleted_at FROM %s %s ORDER BY %s LIMIT $%d OFFSET $%d",
-		q.source, q.where, q.orderBy, len(args)-1, len(args))
+		"SELECT key, %s, partition, offset_id, last_updated, deleted_at FROM %s %s ORDER BY %s LIMIT $%d OFFSET $%d",
+		q.countColumn, source, q.where, q.orderBy, limitIdx, offsetIdx)
 
 	var (
 		keys     []KeySummary
@@ -715,7 +764,6 @@ func (s *Store) ListKeys(ctx context.Context, cluster, topic string, p ListKeysP
 			defer wg.Done()
 			countCtx, cancel := context.WithTimeout(ctx, 1*time.Second)
 			defer cancel()
-			countQuery := fmt.Sprintf("SELECT COUNT(*) FROM %s %s", q.source, q.where)
 			countErr = s.pool.QueryRow(countCtx, countQuery, countArgs...).Scan(&total)
 			if countErr != nil {
 				total = -1
@@ -772,8 +820,8 @@ func (s *Store) ExportKeys(ctx context.Context, cluster, topic string, p ListKey
 	defer tx.Rollback(ctx)
 
 	rows, err := tx.Query(ctx, fmt.Sprintf(
-		"SELECT key, message_count, partition, offset_id, last_updated, deleted_at, COALESCE(body, 'null'::jsonb) FROM %s %s ORDER BY %s",
-		q.source, q.where, q.orderBy), q.args...)
+		"SELECT key, %s, partition, offset_id, last_updated, deleted_at, COALESCE(body, 'null'::jsonb) FROM %s %s ORDER BY %s",
+		q.countColumn, q.source, q.where, q.orderBy), q.args...)
 	if err != nil {
 		return fmt.Errorf("exporting keys: %w", err)
 	}
