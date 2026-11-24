@@ -4,7 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.3.0] - 2026-11-24
+
+### Added
+
+- Point-in-time view: a date/time picker on the key browser shows every key as it was at that instant (latest version at or before it, keys tombstoned by then hidden unless the Deleted filter is selected), backed by a new `as_of` parameter on `GET /api/topics/{topic}/keys`
+- Key comparison page (`/compare`) that diffs the latest value of two keys across topics or clusters, reachable from the sidebar and from "Compare with…" on the history page; the selection lives in the URL so comparisons can be shared
+- Kafka record headers are now stored (new nullable `messages.headers` JSONB column, migration 007) and shown in a collapsible section on each version in the message history; history responses include a `headers` array. Messages consumed before this change show no headers until the topic is re-consumed
+- Deletion tracking: keys now record `deleted_at` when their latest version is a tombstone (migration 008, backfilled from existing data, cleared when the key is re-created). The key browser gains an All / Live / Deleted filter, a "Deleted N ago" badge on tombstoned keys and a Deleted Keys count on the topic card; the API adds `status` and `sort_by=deleted_at` to the keys endpoint and `deleted_keys` to topic detail
+- Export: download the key browser's current result set (all pages, honouring every filter including `as_of` and status) or a key's full history (with headers) as JSON or CSV, via an Export menu on both pages. New streaming endpoints `GET /api/topics/{topic}/keys/export` and `GET /api/topics/{topic}/history/export` write rows straight from PostgreSQL without buffering and are exempt from the 30s write timeout
 
 ### Fixed
 
@@ -14,14 +22,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - Consumer startup reads each partition's resume offset with one primary-key probe instead of aggregating every key of the topic (up to 16s per topic on large topics)
 - The bundled PostgreSQL container gets a 1 GB `/dev/shm`; the Docker default of 64 MB made parallel queries and vacuums fail with "could not resize shared memory segment"
 - The `keys` table now autovacuums and auto-analyzes at 2% changed rows instead of 20%, keeping index-only scans (counts, filtered listings) fast on large topics. The syncer no longer runs `ANALYZE keys` on every cluster's 60-second sync, which re-sampled the whole table up to once per cluster per minute
-
-### Added
-
-- Point-in-time view: a date/time picker on the key browser shows every key as it was at that instant (latest version at or before it, keys tombstoned by then hidden unless the Deleted filter is selected), backed by a new `as_of` parameter on `GET /api/topics/{topic}/keys`
-- Key comparison page (`/compare`) that diffs the latest value of two keys across topics or clusters, reachable from the sidebar and from "Compare with…" on the history page; the selection lives in the URL so comparisons can be shared
-- Kafka record headers are now stored (new nullable `messages.headers` JSONB column, migration 007) and shown in a collapsible section on each version in the message history; history responses include a `headers` array. Messages consumed before this change show no headers until the topic is re-consumed
-- Deletion tracking: keys now record `deleted_at` when their latest version is a tombstone (migration 008, backfilled from existing data, cleared when the key is re-created). The key browser gains an All / Live / Deleted filter, a "Deleted N ago" badge on tombstoned keys and a Deleted Keys count on the topic card; the API adds `status` and `sort_by=deleted_at` to the keys endpoint and `deleted_keys` to topic detail
-- Export: download the key browser's current result set (all pages, honouring every filter including `as_of` and status) or a key's full history (with headers) as JSON or CSV, via an Export menu on both pages. New streaming endpoints `GET /api/topics/{topic}/keys/export` and `GET /api/topics/{topic}/history/export` write rows straight from PostgreSQL without buffering and are exempt from the 30s write timeout
 
 ## [1.2.0] - 2026-09-29
 
